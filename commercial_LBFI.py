@@ -634,9 +634,16 @@ with col_p1:
         )])
         fig_c1.update_layout(
             title=dict(text="CA commandes par Client", font=dict(size=13), x=0),
-            legend=dict(orientation="v", y=0.5, x=1.02, font=dict(size=10)),
-            margin=dict(t=40, b=10, l=10, r=150),
-            height=max(340, 40 + n * 18),
+            legend=dict(
+                orientation="h",
+                y=-0.05,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=10),
+                itemwidth=30,
+            ),
+            margin=dict(t=40, b=20, l=10, r=10),
+            height=460,
         )
         st.plotly_chart(fig_c1, use_container_width=True, key="fig_c1")
     else:
@@ -918,14 +925,31 @@ if 'Taux de marge' in df_filtered_base.columns:
                     },
                 )
 
+                # Calcul du plafond Y au p99 pour éviter que les outliers écrasent l'échelle
+                pu_vals = df_scatter['Prix unitaire'].dropna()
+                y_cap = float(pu_vals.quantile(0.99)) if len(pu_vals) > 0 else 500
+                y_max = y_cap * 1.15
+
+                # On marque les outliers au-dessus du cap pour les distinguer
+                df_scatter['_outlier'] = df_scatter['Prix unitaire'] > y_cap
+                df_scatter['Prix_plot'] = df_scatter['Prix unitaire'].clip(upper=y_cap)
+                nb_outliers = df_scatter['_outlier'].sum()
+
                 fig_scatter.update_layout(
                     xaxis=dict(title=x_title, type=x_axis_type),
-                    yaxis=dict(title="Prix unitaire (€)", showgrid=True),
+                    yaxis=dict(
+                        title="Prix unitaire (€)",
+                        showgrid=True,
+                        range=[0, y_max],
+                    ),
                     legend=dict(orientation="h", y=1.08, x=0, title_text=""),
                     hovermode="closest",
                     height=480,
                     margin=dict(t=30, b=40),
                 )
+                if nb_outliers > 0:
+                    st.caption(f"⚠️ Axe Y plafonné au 99e percentile ({y_cap:.0f} €) pour la lisibilité. "
+                               f"{nb_outliers} point(s) au-dessus sont visibles en zoomant ou au survol.")
                 st.plotly_chart(fig_scatter, use_container_width=True, key="fig_scatter_prix")
             else:
                 st.info("Aucune donnée de prix unitaire disponible pour les filtres sélectionnés.")
