@@ -44,7 +44,6 @@ def load_lbfi_data():
     df.columns = df.columns.str.strip()
 
     # --- Normalisation de la date de devis ---
-    # La colonne LBFI s'appelle "Date devis" (datetime natif ou numérique Excel)
     if 'Date devis' in df.columns:
         s_numeric = pd.to_numeric(df['Date devis'], errors='coerce')
         df['Dates_Propres'] = pd.to_datetime(s_numeric, unit='D', origin='1899-12-30', errors='coerce')
@@ -66,44 +65,36 @@ def load_lbfi_data():
     df['Mois_Nom'] = df['Mois_Num'].map(mois_fr).fillna("Janvier")
 
     # --- Normalisation du Prix total ---
-    # Conversion sans fillna(0) d'abord, pour préserver les NaN utiles au prix unitaire
     df['Prix total'] = pd.to_numeric(df['Prix total'], errors='coerce')
 
     # --- Normalisation du Taux de marge (ramené en %) ---
     if 'Taux de marge' in df.columns:
         df['Taux de marge'] = pd.to_numeric(df['Taux de marge'], errors='coerce')
-        # Les valeurs > 100 sont aberrantes (erreurs de saisie) — on les écarte
         df['Taux de marge'] = df['Taux de marge'].where(df['Taux de marge'].between(0, 100))
 
-    # --- Prix unitaire (calculé AVANT le fillna sur Prix total) ---
+    # --- Prix unitaire ---
     if 'Nb exemplaires' in df.columns:
         df['Nb exemplaires'] = pd.to_numeric(df['Nb exemplaires'], errors='coerce')
         df['Prix unitaire'] = df['Prix total'] / df['Nb exemplaires'].replace(0, pd.NA)
         df['Prix unitaire'] = df['Prix unitaire'].where(df['Prix unitaire'] > 0)
 
-    # fillna(0) sur Prix total appliqué seulement après le calcul du prix unitaire
     df['Prix total'] = df['Prix total'].fillna(0)
 
     # --- Normalisation de la colonne Signé ---
-    # LBFI utilise "VRAI"/"FAUX" au lieu de "O"/"N" de PONCEBLANC
-    # On unifie vers "O"/"N" pour que toute la logique ABC soit identique
     if 'Signé ?' in df.columns:
         df = df.rename(columns={'Signé ?': 'Signé?'})
     if 'Signé?' in df.columns:
         df['Signé?'] = df['Signé?'].astype(str).str.strip().str.upper()
         df['Signé?'] = df['Signé?'].map({'VRAI': 'O', 'TRUE': 'O', 'FAUX': 'N', 'FALSE': 'N'}).fillna('N')
 
-    # --- Calcul du délai devis → ouverture dossier fab (équivalent PONCEBLANC) ---
+    # --- Calcul du délai devis → ouverture dossier fab ---
     if 'Date ouverture dossier fab' in df.columns and 'Dates_Propres' in df.columns:
         date_ouv_num = pd.to_numeric(df['Date ouverture dossier fab'], errors='coerce')
         date_ouv = pd.to_datetime(date_ouv_num, unit='D', origin='1899-12-30', errors='coerce')
         date_ouv = date_ouv.fillna(pd.to_datetime(df['Date ouverture dossier fab'], errors='coerce'))
         df['Délai devis ouverture'] = (date_ouv - df['Dates_Propres']).dt.days
-        # On ne conserve que les délais positifs (cohérence métier)
         df['Délai devis ouverture'] = df['Délai devis ouverture'].where(df['Délai devis ouverture'] >= 0)
 
-    # --- Colonne identifiant devis (équivalent "DEVIS N°") ---
-    # LBFI utilise "Numéro de devis"
     if 'Numéro de devis' in df.columns:
         df = df.rename(columns={'Numéro de devis': 'DEVIS N°'})
 
@@ -203,7 +194,6 @@ st.sidebar.header("🎛️ Filtres & Paramètres")
 
 mask_metier = pd.Series(True, index=df.index)
 
-# --- 1. FILTRES TEMPORELS GLOBAUX ---
 st.sidebar.markdown("### 📅 Filtres Temporels Globaux")
 
 vue_mode = st.sidebar.radio(
@@ -242,8 +232,6 @@ mois_selectionnes_bornes = liste_mois_noms[mois_debut_num - 1:mois_fin_num]
 mask_temporel = (df['Année Devis'].isin(annees_selectionnees)) & (df['Mois_Num'] >= mois_debut_num) & (df['Mois_Num'] <= mois_fin_num)
 
 
-# --- 2. FILTRES DOSSIER ---
-# Note : LBFI n'a pas de colonne "Commercial" — ce filtre est omis
 st.sidebar.markdown("### 📁 Dossier")
 
 selected_abc = st.sidebar.multiselect(
@@ -262,7 +250,6 @@ if search_client and "Nom Client" in df.columns:
 if search_devis and "DEVIS N°" in df.columns:
     mask_metier &= df["DEVIS N°"].astype(str).str.contains(search_devis, case=False, na=False)
 
-# Filtre par type de produit (LBFI possède bien cette colonne)
 for col_df, label in [("Type de produit", "Type de produit")]:
     if col_df in df.columns:
         options = sorted([str(x) for x in df[col_df].dropna().unique()])
@@ -275,7 +262,6 @@ df_filtered_base = df[mask_metier & mask_temporel].copy()
 st.sidebar.success(f"Données filtrées : {len(df_filtered_base)} lignes.")
 
 
-# --- FONCTION DE CALCUL DES KPIS ---
 def extraire_kpis_annee(dataframe, annee_cible):
     df_cible = dataframe[dataframe['Année Devis'] == annee_cible]
     col_id = "DEVIS N°" if "DEVIS N°" in dataframe.columns else dataframe.columns[0]
@@ -304,9 +290,6 @@ def extraire_kpis_annee(dataframe, annee_cible):
 # ========================================================
 st.subheader("Performance Commerciale")
 
-# -------------------------------------------------------
-# VUE ANNUELLE
-# -------------------------------------------------------
 if vue_annuelle and len(annees_selectionnees) > 0:
     annees_triees = sorted(annees_selectionnees)
 
@@ -450,9 +433,6 @@ if vue_annuelle and len(annees_selectionnees) > 0:
             df_recap['Tx Succès (vol)'] = df_recap['tx_vol'].map(lambda x: f"{x:.2f} %".replace('.', ','))
             st.dataframe(df_recap[['Année', 'CA Commandes', 'CA Devisé', 'Tx Succès (€)', 'Commandes', 'Devis émis', 'Tx Succès (vol)']], use_container_width=True, hide_index=True)
 
-# -------------------------------------------------------
-# VUE MENSUELLE
-# -------------------------------------------------------
 elif not vue_annuelle and len(annees_selectionnees) > 0:
     tabs_val = st.tabs([f"Année {annee}" for annee in annees_selectionnees])
 
@@ -613,14 +593,12 @@ for col_ni in ["Type de produit"]:
 
 col_p1, col_p2 = st.columns(2)
 
-# --- Camembert 1 : CA commandes par client (tous les clients) ---
 with col_p1:
     if "Nom Client" in df_signe.columns and not df_signe.empty:
         df_c = df_signe.groupby("Nom Client")["Prix total"].sum().sort_values(ascending=False).reset_index()
         df_c.columns = ["Label", "Valeur"]
         n = len(df_c)
 
-        # Palette étendue : on cycle sur des couleurs qualitatives pour couvrir tous les clients
         palette_base = px.colors.qualitative.Set2 + px.colors.qualitative.Pastel + px.colors.qualitative.Safe
         couleurs = [palette_base[i % len(palette_base)] for i in range(n)]
 
@@ -649,7 +627,6 @@ with col_p1:
     else:
         st.info("Aucune donnée client disponible.")
 
-# --- Camembert 2 : CA commandes par type de produit ---
 with col_p2:
     if "Type de produit" in df_signe.columns and not df_signe.empty:
         df_p2 = df_signe.groupby("Type de produit")["Prix total"].sum().sort_values(ascending=False).reset_index()
@@ -670,9 +647,6 @@ with col_p2:
         st.plotly_chart(fig_c2, use_container_width=True, key="fig_c2")
     else:
         st.info("Colonne 'Type de produit' non disponible.")
-
-# Note : LBFI n'a pas de colonne "Matière" (absente du fichier source)
-# Le 3e camembert est omis pour cette BU
 
 
 # ========================================================
@@ -768,7 +742,6 @@ if 'Taux de marge' in df_filtered_base.columns:
         st.caption("Taux moyen global (tous devis) et taux moyen des devis signés uniquement.")
 
         if vue_annuelle:
-            # Taux moyen global par année
             taux_global_yr = (
                 df_marge.groupby('Année Devis')['Taux de marge']
                 .mean()
@@ -777,7 +750,6 @@ if 'Taux de marge' in df_filtered_base.columns:
             taux_global_yr.columns = ['Période', 'Taux moyen global']
             taux_global_yr['Période'] = taux_global_yr['Période'].astype(str)
 
-            # Taux moyen signé par année
             taux_signe_yr = (
                 df_marge[mask_signe_marge].groupby('Année Devis')['Taux de marge']
                 .mean()
@@ -811,9 +783,7 @@ if 'Taux de marge' in df_filtered_base.columns:
                 df_g_all = pd.concat(taux_global_ms, ignore_index=True)
                 df_s_all = pd.concat(taux_signe_ms, ignore_index=True)
                 df_taux = pd.merge(df_g_all, df_s_all, on=['Période', 'Année'], how='outer')
-                # Filtrer uniquement les mois dans la sélection de bornes, sans créer de lignes NaN
                 df_taux = df_taux[df_taux['Période'].isin(mois_selectionnes_bornes)]
-                # Trier par ordre calendaire puis par année
                 ordre_mois = {m: i for i, m in enumerate(liste_mois_noms)}
                 df_taux['_ordre'] = df_taux['Période'].map(ordre_mois)
                 df_taux = df_taux.sort_values(['Année', '_ordre']).drop(columns='_ordre').reset_index(drop=True)
@@ -832,28 +802,30 @@ if 'Taux de marge' in df_filtered_base.columns:
 
                 periode_col = 'Période_affichage' if 'Période_affichage' in df_taux.columns else 'Période'
 
+                # --- MISE À JOUR ICI : 2 DÉCIMALES (.2f) ---
                 fig_marge_bar.add_trace(go.Bar(
                     x=df_taux[periode_col],
                     y=df_taux['Taux moyen global'].round(2),
                     name="Taux moyen global",
                     marker_color='#94a3b8',
-                    text=df_taux['Taux moyen global'].round(1).apply(
-                        lambda v: f"{v:.1f}%".replace('.', ',') if pd.notna(v) and v > 0 else ""
+                    text=df_taux['Taux moyen global'].round(2).apply(
+                        lambda v: f"{v:.2f}%".replace('.', ',') if pd.notna(v) and v > 0 else ""
                     ),
                     textposition='outside',
-                    hovertemplate="<b>%{x}</b><br>Taux moyen global : %{y:.1f}%<extra></extra>",
+                    hovertemplate="<b>%{x}</b><br>Taux moyen global : %{y:.2f}%<extra></extra>",
                 ))
 
+                # --- MISE À JOUR ICI : 2 DÉCIMALES (.2f) ---
                 fig_marge_bar.add_trace(go.Bar(
                     x=df_taux[periode_col],
                     y=df_taux['Taux moyen signé'].round(2),
                     name="Taux moyen signé",
                     marker_color='#22c55e',
-                    text=df_taux['Taux moyen signé'].round(1).apply(
-                        lambda v: f"{v:.1f}%".replace('.', ',') if pd.notna(v) and v > 0 else ""
+                    text=df_taux['Taux moyen signé'].round(2).apply(
+                        lambda v: f"{v:.2f}%".replace('.', ',') if pd.notna(v) and v > 0 else ""
                     ),
                     textposition='outside',
-                    hovertemplate="<b>%{x}</b><br>Taux moyen signé : %{y:.1f}%<extra></extra>",
+                    hovertemplate="<b>%{x}</b><br>Taux moyen signé : %{y:.2f}%<extra></extra>",
                 ))
 
                 fig_marge_bar.update_layout(
@@ -877,7 +849,7 @@ if 'Taux de marge' in df_filtered_base.columns:
         # GRAPHIQUE 2 : NUAGE DE POINTS — PRIX UNITAIRE × TEMPS
         # -------------------------------------------------------
         st.markdown("#### 🔵 Prix unitaire des devis dans le temps")
-        st.caption("Axe Y : prix unitaire · Axe X : date · Taille : quantité (nb exemplaires) · Couleur : statut signé/non signé")
+        st.caption("Axe Y : prix unitaire (Échelle Logarithmique) · Axe X : date · Taille : quantité (nb exemplaires) · Couleur : statut signé/non signé")
 
         if 'Prix unitaire' in df_filtered_base.columns:
             df_scatter = df_filtered_base.dropna(subset=['Prix unitaire', 'Dates_Propres']).copy()
@@ -889,7 +861,6 @@ if 'Taux de marge' in df_filtered_base.columns:
                 )
                 df_scatter['Nb_plot'] = df_scatter['Nb exemplaires'].fillna(1).clip(lower=1)
 
-                # En vue annuelle, on affiche par année (axe discret) pour plus de lisibilité
                 if vue_annuelle:
                     df_scatter['X_val'] = df_scatter['Année Devis'].astype(str)
                     x_axis_type = 'category'
@@ -904,7 +875,7 @@ if 'Taux de marge' in df_filtered_base.columns:
                 fig_scatter = px.scatter(
                     df_scatter,
                     x='X_val',
-                    y='Prix unitaire',
+                    y='Prix unitaire',  # Utilisation directe sans clipping obsolète
                     size='Nb_plot',
                     color='Statut',
                     color_discrete_map=color_map,
@@ -925,31 +896,19 @@ if 'Taux de marge' in df_filtered_base.columns:
                     },
                 )
 
-                # Calcul du plafond Y au p99 pour éviter que les outliers écrasent l'échelle
-                pu_vals = df_scatter['Prix unitaire'].dropna()
-                y_cap = float(pu_vals.quantile(0.99)) if len(pu_vals) > 0 else 500
-                y_max = y_cap * 1.15
-
-                # On marque les outliers au-dessus du cap pour les distinguer
-                df_scatter['_outlier'] = df_scatter['Prix unitaire'] > y_cap
-                df_scatter['Prix_plot'] = df_scatter['Prix unitaire'].clip(upper=y_cap)
-                nb_outliers = df_scatter['_outlier'].sum()
-
+                # --- MISE À JOUR ICI : CONFIGURATION DE L'AXE EN TYPE LOG ---
                 fig_scatter.update_layout(
                     xaxis=dict(title=x_title, type=x_axis_type),
                     yaxis=dict(
-                        title="Prix unitaire (€)",
+                        title="Prix unitaire (€) — Échelle Log",
+                        type='log',
                         showgrid=True,
-                        range=[0, y_max],
                     ),
                     legend=dict(orientation="h", y=1.08, x=0, title_text=""),
                     hovermode="closest",
                     height=480,
                     margin=dict(t=30, b=40),
                 )
-                if nb_outliers > 0:
-                    st.caption(f"⚠️ Axe Y plafonné au 99e percentile ({y_cap:.0f} €) pour la lisibilité. "
-                               f"{nb_outliers} point(s) au-dessus sont visibles en zoomant ou au survol.")
                 st.plotly_chart(fig_scatter, use_container_width=True, key="fig_scatter_prix")
             else:
                 st.info("Aucune donnée de prix unitaire disponible pour les filtres sélectionnés.")
