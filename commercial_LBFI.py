@@ -68,6 +68,18 @@ def load_lbfi_data():
     # --- Normalisation du Prix total ---
     df['Prix total'] = pd.to_numeric(df['Prix total'], errors='coerce').fillna(0)
 
+    # --- Normalisation du Taux de marge (ramené en %) ---
+    if 'Taux de marge' in df.columns:
+        df['Taux de marge'] = pd.to_numeric(df['Taux de marge'], errors='coerce')
+        # Les valeurs > 100 sont aberrantes (erreurs de saisie) — on les écarte
+        df['Taux de marge'] = df['Taux de marge'].where(df['Taux de marge'].between(0, 100))
+
+    # --- Prix unitaire ---
+    if 'Nb exemplaires' in df.columns:
+        df['Nb exemplaires'] = pd.to_numeric(df['Nb exemplaires'], errors='coerce')
+        df['Prix unitaire'] = df['Prix total'] / df['Nb exemplaires'].replace(0, pd.NA)
+        df['Prix unitaire'] = df['Prix unitaire'].where(df['Prix unitaire'] > 0)
+
     # --- Normalisation de la colonne Signé ---
     # LBFI utilise "VRAI"/"FAUX" au lieu de "O"/"N" de PONCEBLANC
     # On unifie vers "O"/"N" pour que toute la logique ABC soit identique
@@ -728,6 +740,197 @@ if 'Délai devis ouverture' in df_filtered_base.columns:
         st.info("Aucune donnée de délai disponible pour les filtres sélectionnés.")
 else:
     st.info("Aucun délai calculable (colonne 'Date ouverture dossier fab' absente ou vide).")
+
+
+# ========================================================
+# SECTION : ANALYSE DES TAUX DE MARGE
+# ========================================================
+st.divider()
+st.subheader("📈 Analyse des Taux de Marge")
+
+if 'Taux de marge' in df_filtered_base.columns:
+    df_marge = df_filtered_base.dropna(subset=['Taux de marge']).copy()
+    mask_signe_marge = df_marge["Signé?"].astype(str).str.upper().str.strip() == "O"
+
+    if not df_marge.empty:
+
+        # -------------------------------------------------------
+        # GRAPHIQUE 1 : DIAGRAMME BÂTONS — TAUX MOYEN PAR PÉRIODE
+        # -------------------------------------------------------
+        st.markdown("#### 🔵 Taux de marge moyen par maille de temps")
+        st.caption("Taux moyen global (tous devis) et taux moyen des devis signés uniquement.")
+
+        if vue_annuelle:
+            # Taux moyen global par année
+            taux_global_yr = (
+                df_marge.groupby('Année Devis')['Taux de marge']
+                .mean()
+                .reset_index()
+            )
+            taux_global_yr.columns = ['Période', 'Taux moyen global']
+            taux_global_yr['Période'] = taux_global_yr['Période'].astype(str)
+
+            # Taux moyen signé par année
+            taux_signe_yr = (
+                df_marge[mask_signe_marge].groupby('Année Devis')['Taux de marge']
+                .mean()
+                .reset_index()
+            )
+            taux_signe_yr.columns = ['Période', 'Taux moyen signé']
+            taux_signe_yr['Période'] = taux_signe_yr['Période'].astype(str)
+
+            df_taux = pd.merge(taux_global_yr, taux_signe_yr, on='Période', how='outer').fillna(0)
+            x_label_marge = "Année"
+
+        else:
+            taux_global_ms = []
+            taux_signe_ms = []
+            for annee_sel in annees_selectionnees:
+                df_marge_annee = df_marge[df_marge['Année Devis'] == annee_sel]
+                mask_s = df_marge_annee["Signé?"].astype(str).str.upper().str.strip() == "O"
+
+                g = df_marge_annee.groupby('Mois_Nom')['Taux de marge'].mean().reindex(mois_selectionnes_bornes).reset_index()
+                g.columns = ['Période', 'Taux moyen global']
+                g['Année'] = str(annee_sel)
+
+                s = df_marge_annee[mask_s].groupby('Mois_Nom')['Taux de marge'].mean().reindex(mois_selectionnes_bornes).reset_index()
+                s.columns = ['Période', 'Taux moyen signé']
+                s['Année'] = str(annee_sel)
+
+                taux_global_ms.append(g)
+                taux_signe_ms.append(s)
+
+            if taux_global_ms:
+                df_g_all = pd.concat(taux_global_ms, ignore_index=True)
+                df_s_all = pd.concat(taux_signe_ms, ignore_index=True)
+                df_taux = pd.merge(df_g_all, df_s_all, on=['Période', 'Année'], how='outer')
+                if len(annees_selectionnees) > 1:
+                    df_taux['Période_label'] = df_taux['Période'] + ' ' + df_taux['Année']
+                else:
+                    df_taux['Période_label'] = df_taux['Période']
+                df_taux = df_taux.rename(columns={'Période_label': 'Période_affichage'})
+            else:
+                df_taux = pd.DataFrame()
+            x_label_marge = "Mois"
+
+        if not df_taux.empty:
+            col_bar_marge, _ = st.columns([8, 2])
+            with col_bar_marge:
+                fig_marge_bar = go.Figure()
+
+                periode_col = 'Période_affichage' if 'Période_affichage' in df_taux.columns else 'Période'
+
+                fig_marge_bar.add_trace(go.Bar(
+                    x=df_taux[periode_col],
+                    y=df_taux['Taux moyen global'].round(2),
+                    name="Taux moyen global",
+                    marker_color='#94a3b8',
+                    text=df_taux['Taux moyen global'].round(1).apply(
+                        lambda v: f"{v:.1f}%".replace('.', ',') if pd.notna(v) and v > 0 else ""
+                    ),
+                    textposition='outside',
+                    hovertemplate="<b>%{x}</b><br>Taux moyen global : %{y:.1f}%<extra></extra>",
+                ))
+
+                fig_marge_bar.add_trace(go.Bar(
+                    x=df_taux[periode_col],
+                    y=df_taux['Taux moyen signé'].round(2),
+                    name="Taux moyen signé",
+                    marker_color='#22c55e',
+                    text=df_taux['Taux moyen signé'].round(1).apply(
+                        lambda v: f"{v:.1f}%".replace('.', ',') if pd.notna(v) and v > 0 else ""
+                    ),
+                    textposition='outside',
+                    hovertemplate="<b>%{x}</b><br>Taux moyen signé : %{y:.1f}%<extra></extra>",
+                ))
+
+                fig_marge_bar.update_layout(
+                    barmode='group',
+                    xaxis=dict(title=x_label_marge, type='category'),
+                    yaxis=dict(title="Taux de marge (%)", showgrid=True, range=[0, max(
+                        df_taux[['Taux moyen global', 'Taux moyen signé']].max(skipna=True).max() * 1.25, 10
+                    )]),
+                    legend=dict(orientation="h", y=1.08, x=0),
+                    hovermode="x unified",
+                    height=380,
+                    margin=dict(t=30, b=40),
+                )
+                st.plotly_chart(fig_marge_bar, use_container_width=True, key="fig_marge_bar")
+        else:
+            st.info("Aucune donnée de taux de marge disponible pour les filtres sélectionnés.")
+
+        st.write("---")
+
+        # -------------------------------------------------------
+        # GRAPHIQUE 2 : NUAGE DE POINTS — PRIX UNITAIRE × TEMPS
+        # -------------------------------------------------------
+        st.markdown("#### 🔵 Prix unitaire des devis dans le temps")
+        st.caption("Axe Y : prix unitaire · Axe X : date · Taille : quantité (nb exemplaires) · Couleur : statut signé/non signé")
+
+        if 'Prix unitaire' in df_filtered_base.columns:
+            df_scatter = df_filtered_base.dropna(subset=['Prix unitaire', 'Dates_Propres']).copy()
+            df_scatter = df_scatter[df_scatter['Prix unitaire'] > 0]
+
+            if not df_scatter.empty:
+                df_scatter['Statut'] = df_scatter["Signé?"].apply(
+                    lambda x: "Signé ✅" if str(x).upper().strip() == "O" else "Non signé ❌"
+                )
+                df_scatter['Nb_plot'] = df_scatter['Nb exemplaires'].fillna(1).clip(lower=1)
+
+                # En vue annuelle, on affiche par année (axe discret) pour plus de lisibilité
+                if vue_annuelle:
+                    df_scatter['X_val'] = df_scatter['Année Devis'].astype(str)
+                    x_axis_type = 'category'
+                    x_title = "Année"
+                else:
+                    df_scatter['X_val'] = df_scatter['Dates_Propres']
+                    x_axis_type = 'date'
+                    x_title = "Date"
+
+                color_map = {"Signé ✅": "#22c55e", "Non signé ❌": "#f87171"}
+
+                fig_scatter = px.scatter(
+                    df_scatter,
+                    x='X_val',
+                    y='Prix unitaire',
+                    size='Nb_plot',
+                    color='Statut',
+                    color_discrete_map=color_map,
+                    hover_data={
+                        'Nom Client': True,
+                        'DEVIS N°': True if 'DEVIS N°' in df_scatter.columns else False,
+                        'Nb_plot': False,
+                        'Nb exemplaires': True,
+                        'Prix unitaire': ':.2f',
+                        'X_val': False,
+                    },
+                    size_max=40,
+                    opacity=0.7,
+                    labels={
+                        'X_val': x_title,
+                        'Prix unitaire': 'Prix unitaire (€)',
+                        'Statut': 'Statut',
+                    },
+                )
+
+                fig_scatter.update_layout(
+                    xaxis=dict(title=x_title, type=x_axis_type),
+                    yaxis=dict(title="Prix unitaire (€)", showgrid=True),
+                    legend=dict(orientation="h", y=1.08, x=0, title_text=""),
+                    hovermode="closest",
+                    height=480,
+                    margin=dict(t=30, b=40),
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True, key="fig_scatter_prix")
+            else:
+                st.info("Aucune donnée de prix unitaire disponible pour les filtres sélectionnés.")
+        else:
+            st.info("La colonne 'Prix unitaire' n'a pas pu être calculée (vérifiez 'Prix total' et 'Nb exemplaires').")
+
+    else:
+        st.info("Aucune donnée de taux de marge disponible pour les filtres sélectionnés.")
+else:
+    st.info("Colonne 'Taux de marge' absente des données.")
 
 
 # ========================================================
