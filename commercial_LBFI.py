@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -729,6 +730,89 @@ else:
 st.divider()
 st.subheader("📈 Analyse des Taux de Marge")
 
+# Fonction Helper Universelle pour ajouter les courbes de tendance et les R² (Régression Linéaire robuste)
+def add_trendlines_to_fig(fig, df_source, x_col, y_col, is_log=False):
+    df_sub = df_source.copy()
+
+    def calc_trend(df_t):
+        df_tmp = df_t[[x_col, y_col]].replace([np.inf, -np.inf], np.nan).dropna()
+        if len(df_tmp) < 2: return None
+        x = df_tmp[x_col]
+        y = df_tmp[y_col]
+        
+        # Si on est en échelle logarithmique, on ignore les valeurs <= 0
+        if is_log:
+            valid_log = y > 0
+            x = x[valid_log]
+            y = y[valid_log]
+
+        # Convertir les abscisses en numérique pour la régression mathématique
+        if pd.api.types.is_datetime64_any_dtype(x):
+            x_num = x.map(lambda d: d.toordinal())
+        else:
+            x_num = pd.to_numeric(x, errors='coerce')
+            valid = x_num.notna()
+            x = x[valid]
+            y = y[valid]
+            x_num = x_num[valid]
+
+        if len(x_num) < 2: return None
+
+        # Régression linéaire : sur Y, ou sur log10(Y) si is_log=True
+        if is_log:
+            y_fit = np.log10(y)
+        else:
+            y_fit = y
+            
+        m, b = np.polyfit(x_num, y_fit, 1)
+        y_pred_fit = m * x_num + b
+        
+        # Ramener les prédictions dans l'espace d'origine pour l'affichage
+        if is_log:
+            y_pred = 10 ** y_pred_fit
+        else:
+            y_pred = y_pred_fit
+            
+        # Calcul du R²
+        ss_res = np.sum((y_fit - y_pred_fit)**2)
+        ss_tot = np.sum((y_fit - np.mean(y_fit))**2)
+        r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+
+        # Trier pour que la ligne soit tracée de gauche à droite
+        sort_idx = np.argsort(x_num.values)
+        return x.iloc[sort_idx], np.array(y_pred)[sort_idx], m, b, r2
+
+    def format_eq(m, b, r2):
+        m_s = f"{m:.2e}" if abs(m) < 0.001 else f"{m:.4f}"
+        b_s = f"{b:.2e}" if abs(b) < 0.001 else f"{b:.2f}"
+        sign = "+" if b >= 0 else ""
+        if is_log:
+            return f"log10(y) = {m_s}x {sign} {b_s} | R² = {r2:.2f}"
+        else:
+            return f"y = {m_s}x {sign} {b_s} | R² = {r2:.2f}"
+
+    # 1. Tendance Globale
+    res_g = calc_trend(df_sub)
+    if res_g:
+        xg, yg, m, b, r2 = res_g
+        fig.add_trace(go.Scatter(x=xg, y=yg, mode='lines', name=f"Tendance Globale | {format_eq(m,b,r2)}",
+                                 line=dict(color='#64748b', width=2, dash='dash'), hoverinfo='skip'))
+
+    # 2. Tendance Signé
+    res_s = calc_trend(df_sub[df_sub['Statut'] == "Signé ✅"])
+    if res_s:
+        xs, ys, m, b, r2 = res_s
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode='lines', name=f"Tendance Signé | {format_eq(m,b,r2)}",
+                                 line=dict(color='#15803d', width=2, dash='dot'), hoverinfo='skip'))
+
+    # 3. Tendance Refusé
+    res_r = calc_trend(df_sub[df_sub['Statut'] == "Non signé ❌"])
+    if res_r:
+        xr, yr, m, b, r2 = res_r
+        fig.add_trace(go.Scatter(x=xr, y=yr, mode='lines', name=f"Tendance Refusé | {format_eq(m,b,r2)}",
+                                 line=dict(color='#b91c1c', width=2, dash='dot'), hoverinfo='skip'))
+
+
 if 'Taux de marge' in df_filtered_base.columns:
     df_marge = df_filtered_base.dropna(subset=['Taux de marge']).copy()
     
@@ -926,15 +1010,18 @@ if 'Taux de marge' in df_filtered_base.columns:
                 },
             )
 
+            # --- Injection des lignes de tendance ---
+            add_trendlines_to_fig(fig_scatter_marge, df_marge_scatter, 'X_val', 'Taux de marge', is_log=False)
+
             fig_scatter_marge.update_layout(
                 xaxis=dict(title=x_title_marge, type=x_axis_type_marge),
                 yaxis=dict(
                     title="Taux de marge (%)",
                     showgrid=True,
                 ),
-                legend=dict(orientation="h", y=1.08, x=0, title_text=""),
+                legend=dict(orientation="h", y=1.18, x=0, title_text=""),
                 hovermode="closest",
-                height=480,
+                height=520,
                 margin=dict(t=30, b=40),
             )
             st.plotly_chart(fig_scatter_marge, use_container_width=True, key="fig_scatter_marge_temps")
@@ -994,6 +1081,9 @@ if 'Taux de marge' in df_filtered_base.columns:
                     },
                 )
 
+                # --- Injection des lignes de tendance avec correction logarithmique ---
+                add_trendlines_to_fig(fig_scatter, df_scatter, 'X_val', 'Prix unitaire', is_log=True)
+
                 fig_scatter.update_layout(
                     xaxis=dict(title=x_title, type=x_axis_type),
                     yaxis=dict(
@@ -1001,9 +1091,9 @@ if 'Taux de marge' in df_filtered_base.columns:
                         type='log',
                         showgrid=True,
                     ),
-                    legend=dict(orientation="h", y=1.08, x=0, title_text=""),
+                    legend=dict(orientation="h", y=1.18, x=0, title_text=""),
                     hovermode="closest",
-                    height=480,
+                    height=520,
                     margin=dict(t=30, b=40),
                 )
                 st.plotly_chart(fig_scatter, use_container_width=True, key="fig_scatter_prix")
