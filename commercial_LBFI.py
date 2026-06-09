@@ -731,7 +731,9 @@ st.subheader("📈 Analyse des Taux de Marge")
 
 if 'Taux de marge' in df_filtered_base.columns:
     df_marge = df_filtered_base.dropna(subset=['Taux de marge']).copy()
+    
     mask_signe_marge = df_marge["Signé?"].astype(str).str.upper().str.strip() == "O"
+    mask_refuse_marge = df_marge["Signé?"].astype(str).str.upper().str.strip() != "O"
 
     if not df_marge.empty:
 
@@ -739,7 +741,7 @@ if 'Taux de marge' in df_filtered_base.columns:
         # GRAPHIQUE 1 : DIAGRAMME BÂTONS — TAUX MOYEN PAR PÉRIODE
         # -------------------------------------------------------
         st.markdown("#### 🔵 Taux de marge moyen par maille de temps")
-        st.caption("Taux moyen global (tous devis) et taux moyen des devis signés uniquement.")
+        st.caption("Comparaison du taux moyen global, des devis signés, et des devis refusés.")
 
         if vue_annuelle:
             taux_global_yr = (
@@ -758,15 +760,26 @@ if 'Taux de marge' in df_filtered_base.columns:
             taux_signe_yr.columns = ['Période', 'Taux moyen signé']
             taux_signe_yr['Période'] = taux_signe_yr['Période'].astype(str)
 
+            taux_refuse_yr = (
+                df_marge[mask_refuse_marge].groupby('Année Devis')['Taux de marge']
+                .mean()
+                .reset_index()
+            )
+            taux_refuse_yr.columns = ['Période', 'Taux moyen refusé']
+            taux_refuse_yr['Période'] = taux_refuse_yr['Période'].astype(str)
+
             df_taux = pd.merge(taux_global_yr, taux_signe_yr, on='Période', how='outer').fillna(0)
+            df_taux = pd.merge(df_taux, taux_refuse_yr, on='Période', how='outer').fillna(0)
             x_label_marge = "Année"
 
         else:
             taux_global_ms = []
             taux_signe_ms = []
+            taux_refuse_ms = []
             for annee_sel in annees_selectionnees:
                 df_marge_annee = df_marge[df_marge['Année Devis'] == annee_sel]
                 mask_s = df_marge_annee["Signé?"].astype(str).str.upper().str.strip() == "O"
+                mask_r = df_marge_annee["Signé?"].astype(str).str.upper().str.strip() != "O"
 
                 g = df_marge_annee.groupby('Mois_Nom')['Taux de marge'].mean().reset_index()
                 g.columns = ['Période', 'Taux moyen global']
@@ -776,17 +789,26 @@ if 'Taux de marge' in df_filtered_base.columns:
                 s.columns = ['Période', 'Taux moyen signé']
                 s['Année'] = str(annee_sel)
 
+                r = df_marge_annee[mask_r].groupby('Mois_Nom')['Taux de marge'].mean().reset_index()
+                r.columns = ['Période', 'Taux moyen refusé']
+                r['Année'] = str(annee_sel)
+
                 taux_global_ms.append(g)
                 taux_signe_ms.append(s)
+                taux_refuse_ms.append(r)
 
             if taux_global_ms:
                 df_g_all = pd.concat(taux_global_ms, ignore_index=True)
                 df_s_all = pd.concat(taux_signe_ms, ignore_index=True)
+                df_r_all = pd.concat(taux_refuse_ms, ignore_index=True)
+                
                 df_taux = pd.merge(df_g_all, df_s_all, on=['Période', 'Année'], how='outer')
+                df_taux = pd.merge(df_taux, df_r_all, on=['Période', 'Année'], how='outer')
                 df_taux = df_taux[df_taux['Période'].isin(mois_selectionnes_bornes)]
+                
                 ordre_mois = {m: i for i, m in enumerate(liste_mois_noms)}
                 df_taux['_ordre'] = df_taux['Période'].map(ordre_mois)
-                df_taux = df_taux.sort_values(['Année', '_ordre']).drop(columns='_ordre').reset_index(drop=True)
+                df_taux = df_taux.sort_values(['Année', '_ordre']).drop(columns='_ordre').reset_index(drop=True).fillna(0)
                 if len(annees_selectionnees) > 1:
                     df_taux['Période_affichage'] = df_taux['Période'] + ' ' + df_taux['Année']
                 else:
@@ -802,7 +824,6 @@ if 'Taux de marge' in df_filtered_base.columns:
 
                 periode_col = 'Période_affichage' if 'Période_affichage' in df_taux.columns else 'Période'
 
-                # --- MISE À JOUR ICI : 2 DÉCIMALES (.2f) ---
                 fig_marge_bar.add_trace(go.Bar(
                     x=df_taux[periode_col],
                     y=df_taux['Taux moyen global'].round(2),
@@ -815,7 +836,6 @@ if 'Taux de marge' in df_filtered_base.columns:
                     hovertemplate="<b>%{x}</b><br>Taux moyen global : %{y:.2f}%<extra></extra>",
                 ))
 
-                # --- MISE À JOUR ICI : 2 DÉCIMALES (.2f) ---
                 fig_marge_bar.add_trace(go.Bar(
                     x=df_taux[periode_col],
                     y=df_taux['Taux moyen signé'].round(2),
@@ -828,11 +848,23 @@ if 'Taux de marge' in df_filtered_base.columns:
                     hovertemplate="<b>%{x}</b><br>Taux moyen signé : %{y:.2f}%<extra></extra>",
                 ))
 
+                fig_marge_bar.add_trace(go.Bar(
+                    x=df_taux[periode_col],
+                    y=df_taux['Taux moyen refusé'].round(2),
+                    name="Taux moyen refusé",
+                    marker_color='#ef4444',
+                    text=df_taux['Taux moyen refusé'].round(2).apply(
+                        lambda v: f"{v:.2f}%".replace('.', ',') if pd.notna(v) and v > 0 else ""
+                    ),
+                    textposition='outside',
+                    hovertemplate="<b>%{x}</b><br>Taux moyen refusé : %{y:.2f}%<extra></extra>",
+                ))
+
                 fig_marge_bar.update_layout(
                     barmode='group',
                     xaxis=dict(title=x_label_marge, type='category'),
                     yaxis=dict(title="Taux de marge (%)", showgrid=True, range=[0, max(
-                        df_taux[['Taux moyen global', 'Taux moyen signé']].max(skipna=True).max() * 1.25, 10
+                        df_taux[['Taux moyen global', 'Taux moyen signé', 'Taux moyen refusé']].max(skipna=True).max() * 1.25, 10
                     )]),
                     legend=dict(orientation="h", y=1.08, x=0),
                     hovermode="x unified",
@@ -846,7 +878,73 @@ if 'Taux de marge' in df_filtered_base.columns:
         st.write("---")
 
         # -------------------------------------------------------
-        # GRAPHIQUE 2 : NUAGE DE POINTS — PRIX UNITAIRE × TEMPS
+        # GRAPHIQUE NOUVEAU : NUAGE DE POINTS — TAUX DE MARGE × TEMPS
+        # -------------------------------------------------------
+        st.markdown("#### 🔵 Détail des taux de marge dans le temps")
+        st.caption("Axe Y : Taux de marge (%) · Axe X : date · Taille : quantité (nb exemplaires) · Couleur : statut signé/non signé")
+
+        df_marge_scatter = df_filtered_base.dropna(subset=['Taux de marge', 'Dates_Propres']).copy()
+
+        if not df_marge_scatter.empty:
+            df_marge_scatter['Statut'] = df_marge_scatter["Signé?"].apply(
+                lambda x: "Signé ✅" if str(x).upper().strip() == "O" else "Non signé ❌"
+            )
+            df_marge_scatter['Nb_plot'] = df_marge_scatter['Nb exemplaires'].fillna(1).clip(lower=1)
+
+            if vue_annuelle:
+                df_marge_scatter['X_val'] = df_marge_scatter['Année Devis'].astype(str)
+                x_axis_type_marge = 'category'
+                x_title_marge = "Année"
+            else:
+                df_marge_scatter['X_val'] = df_marge_scatter['Dates_Propres']
+                x_axis_type_marge = 'date'
+                x_title_marge = "Date"
+
+            color_map_marge = {"Signé ✅": "#22c55e", "Non signé ❌": "#ef4444"}
+
+            fig_scatter_marge = px.scatter(
+                df_marge_scatter,
+                x='X_val',
+                y='Taux de marge',
+                size='Nb_plot',
+                color='Statut',
+                color_discrete_map=color_map_marge,
+                hover_data={
+                    'Nom Client': True,
+                    'DEVIS N°': True if 'DEVIS N°' in df_marge_scatter.columns else False,
+                    'Nb_plot': False,
+                    'Nb exemplaires': True,
+                    'Taux de marge': ':.2f',
+                    'X_val': False,
+                },
+                size_max=40,
+                opacity=0.7,
+                labels={
+                    'X_val': x_title_marge,
+                    'Taux de marge': 'Taux de marge (%)',
+                    'Statut': 'Statut',
+                },
+            )
+
+            fig_scatter_marge.update_layout(
+                xaxis=dict(title=x_title_marge, type=x_axis_type_marge),
+                yaxis=dict(
+                    title="Taux de marge (%)",
+                    showgrid=True,
+                ),
+                legend=dict(orientation="h", y=1.08, x=0, title_text=""),
+                hovermode="closest",
+                height=480,
+                margin=dict(t=30, b=40),
+            )
+            st.plotly_chart(fig_scatter_marge, use_container_width=True, key="fig_scatter_marge_temps")
+        else:
+            st.info("Aucune donnée de date/marge valide pour ce graphique.")
+
+        st.write("---")
+
+        # -------------------------------------------------------
+        # GRAPHIQUE 2 (Ancien) : NUAGE DE POINTS — PRIX UNITAIRE × TEMPS
         # -------------------------------------------------------
         st.markdown("#### 🔵 Prix unitaire des devis dans le temps")
         st.caption("Axe Y : prix unitaire (Échelle Logarithmique) · Axe X : date · Taille : quantité (nb exemplaires) · Couleur : statut signé/non signé")
@@ -870,12 +968,12 @@ if 'Taux de marge' in df_filtered_base.columns:
                     x_axis_type = 'date'
                     x_title = "Date"
 
-                color_map = {"Signé ✅": "#22c55e", "Non signé ❌": "#f87171"}
+                color_map = {"Signé ✅": "#22c55e", "Non signé ❌": "#ef4444"}
 
                 fig_scatter = px.scatter(
                     df_scatter,
                     x='X_val',
-                    y='Prix unitaire',  # Utilisation directe sans clipping obsolète
+                    y='Prix unitaire',
                     size='Nb_plot',
                     color='Statut',
                     color_discrete_map=color_map,
@@ -896,7 +994,6 @@ if 'Taux de marge' in df_filtered_base.columns:
                     },
                 )
 
-                # --- MISE À JOUR ICI : CONFIGURATION DE L'AXE EN TYPE LOG ---
                 fig_scatter.update_layout(
                     xaxis=dict(title=x_title, type=x_axis_type),
                     yaxis=dict(
