@@ -66,7 +66,8 @@ def load_lbfi_data():
     df['Mois_Nom'] = df['Mois_Num'].map(mois_fr).fillna("Janvier")
 
     # --- Normalisation du Prix total ---
-    df['Prix total'] = pd.to_numeric(df['Prix total'], errors='coerce').fillna(0)
+    # Conversion sans fillna(0) d'abord, pour préserver les NaN utiles au prix unitaire
+    df['Prix total'] = pd.to_numeric(df['Prix total'], errors='coerce')
 
     # --- Normalisation du Taux de marge (ramené en %) ---
     if 'Taux de marge' in df.columns:
@@ -74,11 +75,14 @@ def load_lbfi_data():
         # Les valeurs > 100 sont aberrantes (erreurs de saisie) — on les écarte
         df['Taux de marge'] = df['Taux de marge'].where(df['Taux de marge'].between(0, 100))
 
-    # --- Prix unitaire ---
+    # --- Prix unitaire (calculé AVANT le fillna sur Prix total) ---
     if 'Nb exemplaires' in df.columns:
         df['Nb exemplaires'] = pd.to_numeric(df['Nb exemplaires'], errors='coerce')
         df['Prix unitaire'] = df['Prix total'] / df['Nb exemplaires'].replace(0, pd.NA)
         df['Prix unitaire'] = df['Prix unitaire'].where(df['Prix unitaire'] > 0)
+
+    # fillna(0) sur Prix total appliqué seulement après le calcul du prix unitaire
+    df['Prix total'] = df['Prix total'].fillna(0)
 
     # --- Normalisation de la colonne Signé ---
     # LBFI utilise "VRAI"/"FAUX" au lieu de "O"/"N" de PONCEBLANC
@@ -609,34 +613,30 @@ for col_ni in ["Type de produit"]:
 
 col_p1, col_p2 = st.columns(2)
 
-# --- Camembert 1 : CA commandes par client (top 6) ---
+# --- Camembert 1 : CA commandes par client (tous les clients) ---
 with col_p1:
     if "Nom Client" in df_signe.columns and not df_signe.empty:
         df_c = df_signe.groupby("Nom Client")["Prix total"].sum().sort_values(ascending=False).reset_index()
         df_c.columns = ["Label", "Valeur"]
-        top6 = df_c.head(6)["Label"].tolist()
         n = len(df_c)
 
-        legend_labels = [lbl if lbl in top6 else "" for lbl in df_c["Label"]]
-        couleurs = (
-            px.colors.qualitative.Set2[:min(6, n)]
-            + ["#e2e8f0"] * max(0, n - 6)
-        )
+        # Palette étendue : on cycle sur des couleurs qualitatives pour couvrir tous les clients
+        palette_base = px.colors.qualitative.Set2 + px.colors.qualitative.Pastel + px.colors.qualitative.Safe
+        couleurs = [palette_base[i % len(palette_base)] for i in range(n)]
 
         fig_c1 = go.Figure(data=[go.Pie(
-            labels=legend_labels,
+            labels=df_c["Label"],
             values=df_c["Valeur"],
             hole=0.4,
             textinfo="percent",
-            customdata=df_c["Label"],
-            hovertemplate="<b>%{customdata}</b><br>CA : %{value:,.0f} €<br>Part : %{percent}<extra></extra>",
+            hovertemplate="<b>%{label}</b><br>CA : %{value:,.0f} €<br>Part : %{percent}<extra></extra>",
             marker=dict(colors=couleurs),
         )])
         fig_c1.update_layout(
-            title=dict(text="CA commandes par Client <span style='font-size:11px;color:#94a3b8'>(top 6 nommés, survol pour détail)</span>", font=dict(size=13), x=0),
-            legend=dict(orientation="h", y=-0.15, x=0),
-            margin=dict(t=40, b=10, l=10, r=10),
-            height=340,
+            title=dict(text="CA commandes par Client", font=dict(size=13), x=0),
+            legend=dict(orientation="v", y=0.5, x=1.02, font=dict(size=10)),
+            margin=dict(t=40, b=10, l=10, r=150),
+            height=max(340, 40 + n * 18),
         )
         st.plotly_chart(fig_c1, use_container_width=True, key="fig_c1")
     else:
@@ -789,11 +789,11 @@ if 'Taux de marge' in df_filtered_base.columns:
                 df_marge_annee = df_marge[df_marge['Année Devis'] == annee_sel]
                 mask_s = df_marge_annee["Signé?"].astype(str).str.upper().str.strip() == "O"
 
-                g = df_marge_annee.groupby('Mois_Nom')['Taux de marge'].mean().reindex(mois_selectionnes_bornes).reset_index()
+                g = df_marge_annee.groupby('Mois_Nom')['Taux de marge'].mean().reset_index()
                 g.columns = ['Période', 'Taux moyen global']
                 g['Année'] = str(annee_sel)
 
-                s = df_marge_annee[mask_s].groupby('Mois_Nom')['Taux de marge'].mean().reindex(mois_selectionnes_bornes).reset_index()
+                s = df_marge_annee[mask_s].groupby('Mois_Nom')['Taux de marge'].mean().reset_index()
                 s.columns = ['Période', 'Taux moyen signé']
                 s['Année'] = str(annee_sel)
 
@@ -804,11 +804,16 @@ if 'Taux de marge' in df_filtered_base.columns:
                 df_g_all = pd.concat(taux_global_ms, ignore_index=True)
                 df_s_all = pd.concat(taux_signe_ms, ignore_index=True)
                 df_taux = pd.merge(df_g_all, df_s_all, on=['Période', 'Année'], how='outer')
+                # Filtrer uniquement les mois dans la sélection de bornes, sans créer de lignes NaN
+                df_taux = df_taux[df_taux['Période'].isin(mois_selectionnes_bornes)]
+                # Trier par ordre calendaire puis par année
+                ordre_mois = {m: i for i, m in enumerate(liste_mois_noms)}
+                df_taux['_ordre'] = df_taux['Période'].map(ordre_mois)
+                df_taux = df_taux.sort_values(['Année', '_ordre']).drop(columns='_ordre').reset_index(drop=True)
                 if len(annees_selectionnees) > 1:
-                    df_taux['Période_label'] = df_taux['Période'] + ' ' + df_taux['Année']
+                    df_taux['Période_affichage'] = df_taux['Période'] + ' ' + df_taux['Année']
                 else:
-                    df_taux['Période_label'] = df_taux['Période']
-                df_taux = df_taux.rename(columns={'Période_label': 'Période_affichage'})
+                    df_taux['Période_affichage'] = df_taux['Période']
             else:
                 df_taux = pd.DataFrame()
             x_label_marge = "Mois"
