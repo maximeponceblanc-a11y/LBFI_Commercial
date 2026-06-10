@@ -44,14 +44,12 @@ def load_lbfi_data():
 
     df.columns = df.columns.str.strip()
 
-    # --- Normalisation de la date de devis ---
     if 'Date devis' in df.columns:
         s_numeric = pd.to_numeric(df['Date devis'], errors='coerce')
         df['Dates_Propres'] = pd.to_datetime(s_numeric, unit='D', origin='1899-12-30', errors='coerce')
         df['Dates_Propres'] = df['Dates_Propres'].fillna(pd.to_datetime(df['Date devis'], errors='coerce'))
         df = df.dropna(subset=['Dates_Propres'])
 
-    # --- Extraction Mois / Année depuis la date ---
     if 'Dates_Propres' in df.columns:
         df['Mois_Num'] = df['Dates_Propres'].dt.month.fillna(1).astype(int)
         df['Année Devis'] = df['Dates_Propres'].dt.year.fillna(2026).astype(int)
@@ -65,15 +63,12 @@ def load_lbfi_data():
     }
     df['Mois_Nom'] = df['Mois_Num'].map(mois_fr).fillna("Janvier")
 
-    # --- Normalisation du Prix total ---
     df['Prix total'] = pd.to_numeric(df['Prix total'], errors='coerce')
 
-    # --- Normalisation du Taux de marge (ramené en %) ---
     if 'Taux de marge' in df.columns:
         df['Taux de marge'] = pd.to_numeric(df['Taux de marge'], errors='coerce')
         df['Taux de marge'] = df['Taux de marge'].where(df['Taux de marge'].between(0, 100))
 
-    # --- Prix unitaire ---
     if 'Nb exemplaires' in df.columns:
         df['Nb exemplaires'] = pd.to_numeric(df['Nb exemplaires'], errors='coerce')
         df['Prix unitaire'] = df['Prix total'] / df['Nb exemplaires'].replace(0, pd.NA)
@@ -81,14 +76,12 @@ def load_lbfi_data():
 
     df['Prix total'] = df['Prix total'].fillna(0)
 
-    # --- Normalisation de la colonne Signé ---
     if 'Signé ?' in df.columns:
         df = df.rename(columns={'Signé ?': 'Signé?'})
     if 'Signé?' in df.columns:
         df['Signé?'] = df['Signé?'].astype(str).str.strip().str.upper()
         df['Signé?'] = df['Signé?'].map({'VRAI': 'O', 'TRUE': 'O', 'FAUX': 'N', 'FALSE': 'N'}).fillna('N')
 
-    # --- Calcul du délai devis → ouverture dossier fab ---
     if 'Date ouverture dossier fab' in df.columns and 'Dates_Propres' in df.columns:
         date_ouv_num = pd.to_numeric(df['Date ouverture dossier fab'], errors='coerce')
         date_ouv = pd.to_datetime(date_ouv_num, unit='D', origin='1899-12-30', errors='coerce')
@@ -257,6 +250,9 @@ for col_df, label in [("Type de produit", "Type de produit")]:
         selected = st.sidebar.multiselect(label, options=options)
         if selected:
             mask_metier &= df[col_df].astype(str).isin(selected)
+
+st.sidebar.markdown("### 📈 Analyse avancée")
+show_trends = st.sidebar.checkbox("Afficher les courbes de tendance", value=False, help="Affiche les tendances linéaires et le R² pour analyser la dynamique sur les graphiques de nuage de points.")
 
 
 df_filtered_base = df[mask_metier & mask_temporel].copy()
@@ -730,7 +726,6 @@ else:
 st.divider()
 st.subheader("📈 Analyse des Taux de Marge")
 
-# Fonction Helper Universelle pour ajouter les courbes de tendance et les R² (Régression Linéaire robuste)
 def add_trendlines_to_fig(fig, df_source, x_col, y_col, is_log=False):
     df_sub = df_source.copy()
 
@@ -740,13 +735,11 @@ def add_trendlines_to_fig(fig, df_source, x_col, y_col, is_log=False):
         x = df_tmp[x_col]
         y = df_tmp[y_col]
         
-        # Si on est en échelle logarithmique, on ignore les valeurs <= 0
         if is_log:
             valid_log = y > 0
             x = x[valid_log]
             y = y[valid_log]
 
-        # Convertir les abscisses en numérique pour la régression mathématique
         if pd.api.types.is_datetime64_any_dtype(x):
             x_num = x.map(lambda d: d.toordinal())
         else:
@@ -758,7 +751,6 @@ def add_trendlines_to_fig(fig, df_source, x_col, y_col, is_log=False):
 
         if len(x_num) < 2: return None
 
-        # Régression linéaire : sur Y, ou sur log10(Y) si is_log=True
         if is_log:
             y_fit = np.log10(y)
         else:
@@ -767,18 +759,15 @@ def add_trendlines_to_fig(fig, df_source, x_col, y_col, is_log=False):
         m, b = np.polyfit(x_num, y_fit, 1)
         y_pred_fit = m * x_num + b
         
-        # Ramener les prédictions dans l'espace d'origine pour l'affichage
         if is_log:
             y_pred = 10 ** y_pred_fit
         else:
             y_pred = y_pred_fit
             
-        # Calcul du R²
         ss_res = np.sum((y_fit - y_pred_fit)**2)
         ss_tot = np.sum((y_fit - np.mean(y_fit))**2)
         r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
 
-        # Trier pour que la ligne soit tracée de gauche à droite
         sort_idx = np.argsort(x_num.values)
         return x.iloc[sort_idx], np.array(y_pred)[sort_idx], m, b, r2
 
@@ -791,21 +780,18 @@ def add_trendlines_to_fig(fig, df_source, x_col, y_col, is_log=False):
         else:
             return f"y = {m_s}x {sign} {b_s} | R² = {r2:.2f}"
 
-    # 1. Tendance Globale
     res_g = calc_trend(df_sub)
     if res_g:
         xg, yg, m, b, r2 = res_g
         fig.add_trace(go.Scatter(x=xg, y=yg, mode='lines', name=f"Tendance Globale | {format_eq(m,b,r2)}",
                                  line=dict(color='#64748b', width=2, dash='dash'), hoverinfo='skip'))
 
-    # 2. Tendance Signé
     res_s = calc_trend(df_sub[df_sub['Statut'] == "Signé ✅"])
     if res_s:
         xs, ys, m, b, r2 = res_s
         fig.add_trace(go.Scatter(x=xs, y=ys, mode='lines', name=f"Tendance Signé | {format_eq(m,b,r2)}",
                                  line=dict(color='#15803d', width=2, dash='dot'), hoverinfo='skip'))
 
-    # 3. Tendance Refusé
     res_r = calc_trend(df_sub[df_sub['Statut'] == "Non signé ❌"])
     if res_r:
         xr, yr, m, b, r2 = res_r
@@ -1010,8 +996,8 @@ if 'Taux de marge' in df_filtered_base.columns:
                 },
             )
 
-            # --- Injection des lignes de tendance ---
-            add_trendlines_to_fig(fig_scatter_marge, df_marge_scatter, 'X_val', 'Taux de marge', is_log=False)
+            if show_trends:
+                add_trendlines_to_fig(fig_scatter_marge, df_marge_scatter, 'X_val', 'Taux de marge', is_log=False)
 
             fig_scatter_marge.update_layout(
                 xaxis=dict(title=x_title_marge, type=x_axis_type_marge),
@@ -1031,7 +1017,7 @@ if 'Taux de marge' in df_filtered_base.columns:
         st.write("---")
 
         # -------------------------------------------------------
-        # GRAPHIQUE 2 (Ancien) : NUAGE DE POINTS — PRIX UNITAIRE × TEMPS
+        # GRAPHIQUE 2 : NUAGE DE POINTS — PRIX UNITAIRE × TEMPS
         # -------------------------------------------------------
         st.markdown("#### 🔵 Prix unitaire des devis dans le temps")
         st.caption("Axe Y : prix unitaire (Échelle Logarithmique) · Axe X : date · Taille : quantité (nb exemplaires) · Couleur : statut signé/non signé")
@@ -1081,8 +1067,8 @@ if 'Taux de marge' in df_filtered_base.columns:
                     },
                 )
 
-                # --- Injection des lignes de tendance avec correction logarithmique ---
-                add_trendlines_to_fig(fig_scatter, df_scatter, 'X_val', 'Prix unitaire', is_log=True)
+                if show_trends:
+                    add_trendlines_to_fig(fig_scatter, df_scatter, 'X_val', 'Prix unitaire', is_log=True)
 
                 fig_scatter.update_layout(
                     xaxis=dict(title=x_title, type=x_axis_type),
