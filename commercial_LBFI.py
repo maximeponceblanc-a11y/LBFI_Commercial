@@ -533,24 +533,30 @@ elif not vue_annuelle and len(annees_selectionnees) > 0:
                     st.plotly_chart(fig_vol, use_container_width=True, key=f"fig_vol_{annee_selectionnee}")
 
                 with col_droite:
-                    st.markdown(f"**Part du CA signé par Catégorie ABC ({annee_selectionnee})**")
-                    colors_map = {"GRAND COMPTE": "#00a4bd", "CLIENT INTERMEDIAIRE": "#4ed2e6", "PETITS CLIENTS": "#ff9f00", "NOUVEAU CLIENT": "#94a3b8"}
-                    df_pie = df_annee[df_annee["Signé?"].astype(str).str.upper().str.strip() == "O"].groupby('Catégorie Client ABC')['Prix total'].sum().reset_index(name='Total CA')
-
-                    if not df_pie.empty:
-                        fig_pie = go.Figure(data=[go.Pie(
-                            labels=df_pie['Catégorie Client ABC'], values=df_pie['Total CA'], hole=.4,
-                            marker=dict(colors=[colors_map.get(x, "#94a3b8") for x in df_pie['Catégorie Client ABC']]),
-                            textinfo='percent', hovertemplate="<b>%{label}</b><br>CA : %{value:,.0f} €<br>Part : %{percent}<extra></extra>"
+                    st.markdown(f"**CA par commande client ({annee_selectionnee})**")
+                    df_annee_signe_client = df_annee[df_annee["Signé?"].astype(str).str.upper().str.strip() == "O"]
+                    if "Nom Client" in df_annee_signe_client.columns and not df_annee_signe_client.empty:
+                        df_c_annee = df_annee_signe_client.groupby("Nom Client")["Prix total"].sum().sort_values(ascending=False).reset_index()
+                        df_c_annee.columns = ["Label", "Valeur"]
+                        n_annee = len(df_c_annee)
+                        palette_base_annee = px.colors.qualitative.Set2 + px.colors.qualitative.Pastel + px.colors.qualitative.Safe
+                        couleurs_annee = [palette_base_annee[i % len(palette_base_annee)] for i in range(n_annee)]
+                        fig_c_annee = go.Figure(data=[go.Pie(
+                            labels=df_c_annee["Label"],
+                            values=df_c_annee["Valeur"],
+                            hole=0.4,
+                            textinfo="percent",
+                            hovertemplate="<b>%{label}</b><br>CA : %{value:,.0f} €<br>Part : %{percent}<extra></extra>",
+                            marker=dict(colors=couleurs_annee),
                         )])
+                        fig_c_annee.update_layout(
+                            legend=dict(orientation="h", y=-0.05, x=0.5, xanchor="center", font=dict(size=10), itemwidth=30),
+                            margin=dict(t=10, b=20, l=10, r=10),
+                            height=320,
+                        )
+                        st.plotly_chart(fig_c_annee, use_container_width=True, key=f"fig_c_annee_{annee_selectionnee}")
                     else:
-                        fig_pie = go.Figure(data=[go.Pie(
-                            labels=[f"Aucune commande ({annee_selectionnee})"], values=[1], hole=.4,
-                            marker=dict(colors=["#e2e8f0"]), textinfo='none', hoverinfo='skip', showlegend=True,
-                        )])
-                        fig_pie.update_layout(annotations=[dict(text="Aucune<br>commande", x=0.5, y=0.5, font_size=13, showarrow=False, font_color="#94a3b8")])
-                    fig_pie.update_layout(legend=dict(orientation="h", y=-0.1, x=0), margin=dict(t=10, b=10, l=10, r=10), height=320)
-                    st.plotly_chart(fig_pie, use_container_width=True, key=f"fig_pie_{annee_selectionnee}")
+                        st.info(f"Aucune commande client pour {annee_selectionnee}.")
 
                     st.markdown(f"**📋 Liste des dossiers de devis ({annee_selectionnee})**")
                     df_table = pd.DataFrame()
@@ -591,38 +597,30 @@ for col_ni in ["Type de produit"]:
 col_p1, col_p2 = st.columns(2)
 
 with col_p1:
-    if "Nom Client" in df_signe.columns and not df_signe.empty:
-        df_c = df_signe.groupby("Nom Client")["Prix total"].sum().sort_values(ascending=False).reset_index()
-        df_c.columns = ["Label", "Valeur"]
-        n = len(df_c)
-
-        palette_base = px.colors.qualitative.Set2 + px.colors.qualitative.Pastel + px.colors.qualitative.Safe
-        couleurs = [palette_base[i % len(palette_base)] for i in range(n)]
-
-        fig_c1 = go.Figure(data=[go.Pie(
-            labels=df_c["Label"],
-            values=df_c["Valeur"],
-            hole=0.4,
-            textinfo="percent",
-            hovertemplate="<b>%{label}</b><br>CA : %{value:,.0f} €<br>Part : %{percent}<extra></extra>",
-            marker=dict(colors=couleurs),
-        )])
-        fig_c1.update_layout(
-            title=dict(text="CA commandes par Client", font=dict(size=13), x=0),
-            legend=dict(
-                orientation="h",
-                y=-0.05,
-                x=0.5,
-                xanchor="center",
-                font=dict(size=10),
-                itemwidth=30,
-            ),
-            margin=dict(t=40, b=20, l=10, r=10),
+    if not df_signe.empty and 'Catégorie Client ABC' in df_signe.columns:
+        colors_map_global = {"GRAND COMPTE": "#00a4bd", "CLIENT INTERMEDIAIRE": "#4ed2e6", "PETITS CLIENTS": "#ff9f00", "NOUVEAU CLIENT": "#94a3b8"}
+        df_pie_global = df_signe.groupby('Catégorie Client ABC')['Prix total'].sum().reset_index(name='Total CA')
+        if not df_pie_global.empty:
+            fig_pie_global = go.Figure(data=[go.Pie(
+                labels=df_pie_global['Catégorie Client ABC'], values=df_pie_global['Total CA'], hole=.4,
+                marker=dict(colors=[colors_map_global.get(x, "#94a3b8") for x in df_pie_global['Catégorie Client ABC']]),
+                textinfo='percent', hovertemplate="<b>%{label}</b><br>CA : %{value:,.0f} €<br>Part : %{percent}<extra></extra>"
+            )])
+        else:
+            fig_pie_global = go.Figure(data=[go.Pie(
+                labels=["Aucune commande"], values=[1], hole=.4,
+                marker=dict(colors=["#e2e8f0"]), textinfo='none', hoverinfo='skip', showlegend=True,
+            )])
+            fig_pie_global.update_layout(annotations=[dict(text="Aucune<br>commande", x=0.5, y=0.5, font_size=13, showarrow=False, font_color="#94a3b8")])
+        fig_pie_global.update_layout(
+            title=dict(text="Part du CA signé par Catégorie ABC", font=dict(size=13), x=0),
+            legend=dict(orientation="h", y=-0.1, x=0),
+            margin=dict(t=40, b=10, l=10, r=10),
             height=460,
         )
-        st.plotly_chart(fig_c1, use_container_width=True, key="fig_c1")
+        st.plotly_chart(fig_pie_global, use_container_width=True, key="fig_pie_global")
     else:
-        st.info("Aucune donnée client disponible.")
+        st.info("Aucune donnée de catégorie ABC disponible.")
 
 with col_p2:
     if "Type de produit" in df_signe.columns and not df_signe.empty:
