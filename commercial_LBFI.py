@@ -32,7 +32,7 @@ liste_mois_noms = [
 # --- CHARGEMENT DE LA FEUILLE LBFI DEPUIS GITHUB ---
 @st.cache_data
 def load_lbfi_data():
-    url_github = "https://raw.githubusercontent.com/maximeponceblanc-a11y/commercial/main/Query_tableau_devis.xlsx"
+    url_github = "https://raw.githubusercontent.com/maximeponceblanc-a11y/LBFI_Commercial/main/Query_tableau_devis.xlsx"
 
     try:
         response = requests.get(url_github)
