@@ -374,15 +374,15 @@ if vue_annuelle and len(annees_selectionnees) > 0:
         c7, c8, _ = st.columns(3)
         with c7:
             st.metric(
-                label="🛒 Commande moyenne (tous devis)",
-                value=f"{kpis_courant['cmd_moy_tous']:,.0f} €".replace(',', ' '),
-                delta=delta_str(kpis_courant['cmd_moy_tous'], ref['cmd_moy_tous'] if ref else None)
-            )
-        with c8:
-            st.metric(
                 label="✅ Commande moyenne (signés)",
                 value=f"{kpis_courant['cmd_moy_signe']:,.0f} €".replace(',', ' '),
                 delta=delta_str(kpis_courant['cmd_moy_signe'], ref['cmd_moy_signe'] if ref else None)
+            )
+        with c8:
+            st.metric(
+                label="🛒 Commande moyenne (tous devis)",
+                value=f"{kpis_courant['cmd_moy_tous']:,.0f} €".replace(',', ' '),
+                delta=delta_str(kpis_courant['cmd_moy_tous'], ref['cmd_moy_tous'] if ref else None)
             )
 
         if ref:
@@ -510,11 +510,11 @@ elif not vue_annuelle and len(annees_selectionnees) > 0:
                 st.write("")
                 c7, c8, _ = st.columns(3)
                 with c7:
-                    st.metric(label="🛒 Commande moyenne (tous devis)", value=f"{kpis_current['cmd_moy_tous']:,.0f} €".replace(',', ' '))
-                    st.markdown(f"{générer_html_delta(kpis_current['cmd_moy_tous'], kpis_prev, 'cmd_moy_tous', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['cmd_moy_tous'], kpis_next, 'cmd_moy_tous', annee_next)}", unsafe_allow_html=True)
-                with c8:
                     st.metric(label="✅ Commande moyenne (signés)", value=f"{kpis_current['cmd_moy_signe']:,.0f} €".replace(',', ' '))
                     st.markdown(f"{générer_html_delta(kpis_current['cmd_moy_signe'], kpis_prev, 'cmd_moy_signe', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['cmd_moy_signe'], kpis_next, 'cmd_moy_signe', annee_next)}", unsafe_allow_html=True)
+                with c8:
+                    st.metric(label="🛒 Commande moyenne (tous devis)", value=f"{kpis_current['cmd_moy_tous']:,.0f} €".replace(',', ' '))
+                    st.markdown(f"{générer_html_delta(kpis_current['cmd_moy_tous'], kpis_prev, 'cmd_moy_tous', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['cmd_moy_tous'], kpis_next, 'cmd_moy_tous', annee_next)}", unsafe_allow_html=True)
 
             st.divider()
 
