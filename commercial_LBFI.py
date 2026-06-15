@@ -276,9 +276,13 @@ def extraire_kpis_annee(dataframe, annee_cible):
     vol_signe = df_cible[mask_signe][col_id].nunique()
     tx_succes_vol = (vol_signe / vol_devis * 100) if vol_devis > 0 else 0
 
+    cmd_moy_tous = (ca_devis / vol_devis) if vol_devis > 0 else 0
+    cmd_moy_signe = (ca_signe / vol_signe) if vol_signe > 0 else 0
+
     return {
         "ca_devis": ca_devis, "ca_signe": ca_signe, "tx_ca": tx_succes_ca,
-        "vol_devis": vol_devis, "vol_signe": vol_signe, "tx_vol": tx_succes_vol
+        "vol_devis": vol_devis, "vol_signe": vol_signe, "tx_vol": tx_succes_vol,
+        "cmd_moy_tous": cmd_moy_tous, "cmd_moy_signe": cmd_moy_signe
     }
 
 
@@ -365,6 +369,22 @@ if vue_annuelle and len(annees_selectionnees) > 0:
                 delta=delta_str(kpis_courant['tx_vol'], ref['tx_vol'] if ref else None, is_pct=True)
             )
 
+        st.write("")
+
+        c7, c8, _ = st.columns(3)
+        with c7:
+            st.metric(
+                label="🛒 Commande moyenne (tous devis)",
+                value=f"{kpis_courant['cmd_moy_tous']:,.0f} €".replace(',', ' '),
+                delta=delta_str(kpis_courant['cmd_moy_tous'], ref['cmd_moy_tous'] if ref else None)
+            )
+        with c8:
+            st.metric(
+                label="✅ Commande moyenne (signés)",
+                value=f"{kpis_courant['cmd_moy_signe']:,.0f} €".replace(',', ' '),
+                delta=delta_str(kpis_courant['cmd_moy_signe'], ref['cmd_moy_signe'] if ref else None)
+            )
+
         if ref:
             st.caption(f"↕ Deltas calculés par rapport à {annee_precedente}")
 
@@ -428,7 +448,9 @@ if vue_annuelle and len(annees_selectionnees) > 0:
             df_recap['Commandes'] = df_recap['vol_signe'].astype(int)
             df_recap['Devis émis'] = df_recap['vol_devis'].astype(int)
             df_recap['Tx Succès (vol)'] = df_recap['tx_vol'].map(lambda x: f"{x:.2f} %".replace('.', ','))
-            st.dataframe(df_recap[['Année', 'CA Commandes', 'CA Devisé', 'Tx Succès (€)', 'Commandes', 'Devis émis', 'Tx Succès (vol)']], use_container_width=True, hide_index=True)
+            df_recap['Cmd moy. (tous)'] = df_recap['cmd_moy_tous'].map(lambda x: f"{x:,.0f} €".replace(',', ' '))
+            df_recap['Cmd moy. (signés)'] = df_recap['cmd_moy_signe'].map(lambda x: f"{x:,.0f} €".replace(',', ' '))
+            st.dataframe(df_recap[['Année', 'CA Commandes', 'CA Devisé', 'Tx Succès (€)', 'Commandes', 'Devis émis', 'Tx Succès (vol)', 'Cmd moy. (tous)', 'Cmd moy. (signés)']], use_container_width=True, hide_index=True)
 
 elif not vue_annuelle and len(annees_selectionnees) > 0:
     tabs_val = st.tabs([f"Année {annee}" for annee in annees_selectionnees])
@@ -484,6 +506,15 @@ elif not vue_annuelle and len(annees_selectionnees) > 0:
                 with c6:
                     st.metric(label="% Succès (Volume)", value=f"{kpis_current['tx_vol']:.2f} %".replace('.', ','))
                     st.markdown(f"{générer_html_delta(kpis_current['tx_vol'], kpis_prev, 'tx_vol', annee_prev, is_pct=True)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['tx_vol'], kpis_next, 'tx_vol', annee_next, is_pct=True)}", unsafe_allow_html=True)
+
+                st.write("")
+                c7, c8, _ = st.columns(3)
+                with c7:
+                    st.metric(label="🛒 Commande moyenne (tous devis)", value=f"{kpis_current['cmd_moy_tous']:,.0f} €".replace(',', ' '))
+                    st.markdown(f"{générer_html_delta(kpis_current['cmd_moy_tous'], kpis_prev, 'cmd_moy_tous', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['cmd_moy_tous'], kpis_next, 'cmd_moy_tous', annee_next)}", unsafe_allow_html=True)
+                with c8:
+                    st.metric(label="✅ Commande moyenne (signés)", value=f"{kpis_current['cmd_moy_signe']:,.0f} €".replace(',', ' '))
+                    st.markdown(f"{générer_html_delta(kpis_current['cmd_moy_signe'], kpis_prev, 'cmd_moy_signe', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['cmd_moy_signe'], kpis_next, 'cmd_moy_signe', annee_next)}", unsafe_allow_html=True)
 
             st.divider()
 
