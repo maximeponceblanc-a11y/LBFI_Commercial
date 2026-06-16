@@ -391,7 +391,7 @@ def kpi_card(label, value, delta_prev=None, delta_next=None,
         {delta_block}
     </div>
     """
-    st.html(html) # Correction appliquée ici !
+    st.html(html)
 
 
 def compute_delta(val_curr, kpis_ref, cle):
@@ -414,14 +414,14 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
     """
     Renders the 8 KPI cards arranged in the « Formule Magique » layout:
 
-    Row 1 — CA formula:
-      [CA Devisé]  ×  [% Succès €]  =  [CA Commandes]
+    Row 1 — Volume formula:
+      [Nb devis]  ×  [% Succès vol]  =  [Nb commandes]
 
-    Row 2 — Volume formula:
-      [Nb devis]  ×  [% Succès vol]  =  [Nb commandes]  ×  [Cmd moy. signés]  ↘
+    Row 2 — Arrows & Average order (2D Multipliers):
+         ⬇        ×  [Devis moyen]           ⬇        ×  [Cmd moy. signés]
 
-    Row 3 — Average order:
-      (result arrow from row 2 lands here)             [Cmd moy. tous devis]
+    Row 3 — CA formula:
+      [CA Devisé] ×  [% Succès €]    =  [CA Commandes]
     """
     if not kpis_current:
         st.info("Aucun indicateur disponible pour cette période.")
@@ -435,8 +435,6 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
     def d_next(cle):
         return compute_delta(kp[cle], kpis_next, cle)
 
-    # ── Shared color for "bad" metrics ──
-    # tx_ca can be green or red vs prev
     tx_ca_color = None
     if kpis_prev:
         tx_ca_color = "green" if kp['tx_ca'] >= kpis_prev['tx_ca'] else "red"
@@ -445,43 +443,10 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
     if kpis_prev:
         cmd_moy_signe_color = "green" if kp['cmd_moy_signe'] >= kpis_prev['cmd_moy_signe'] else "red"
 
-    # ── ROW 1 : CA Devisé × % Succès (€) = CA Commandes ──
-    st.markdown("<div style='margin-bottom:6px; font-size:0.8rem; color:#94a3b8; font-weight:600; letter-spacing:0.05em;'>💰 FORMULE CA : CA Devisé × % Succès (€) = CA Commandes</div>", unsafe_allow_html=True)
-    cols = st.columns([5, 0.7, 5, 0.7, 5])
-    with cols[0]:
-        kpi_card(
-            f"CA Devisé {annee_selectionnee}",
-            fmt_val(kp['ca_devis']),
-            delta_prev=d_prev('ca_devis'), delta_next=d_next('ca_devis'),
-            annee_prev=annee_prev, annee_next=annee_next,
-        )
-    with cols[1]:
-        st.markdown("<div class='formula-op'>×</div>", unsafe_allow_html=True)
-    with cols[2]:
-        kpi_card(
-            "% Succès (€)",
-            fmt_val(kp['tx_ca'], is_pct=True),
-            delta_prev=d_prev('tx_ca'), delta_next=d_next('tx_ca'),
-            annee_prev=annee_prev, annee_next=annee_next,
-            is_pct=True,
-            force_color=tx_ca_color,
-        )
-    with cols[3]:
-        st.markdown("<div class='formula-op'>=</div>", unsafe_allow_html=True)
-    with cols[4]:
-        kpi_card(
-            f"CA Commandes {annee_selectionnee}",
-            fmt_val(kp['ca_signe']),
-            delta_prev=d_prev('ca_signe'), delta_next=d_next('ca_signe'),
-            annee_prev=annee_prev, annee_next=annee_next,
-        )
-
-    st.write("")
-
-    # ── ROW 2 : Nb devis × % Succès (vol) = Nb commandes × Cmd moy. signés ──
-    st.markdown("<div style='margin-bottom:6px; font-size:0.8rem; color:#94a3b8; font-weight:600; letter-spacing:0.05em;'>📦 FORMULE VOLUME : Nb devis × % Succès (vol) = Nb commandes × Cmd moy. (signés)</div>", unsafe_allow_html=True)
-    cols2 = st.columns([5, 0.7, 5, 0.7, 5, 0.7, 5])
-    with cols2[0]:
+    # ── ROW 1 : FORMULE VOLUME ──
+    st.markdown("<div style='margin-bottom:6px; font-size:0.8rem; color:#94a3b8; font-weight:600; letter-spacing:0.05em;'>📦 FORMULE VOLUME : Nb devis × % Succès (vol) = Nb commandes</div>", unsafe_allow_html=True)
+    cols1 = st.columns([4, 0.5, 4, 0.5, 4, 0.5, 4])
+    with cols1[0]:
         kpi_card(
             "Nombre de devis émis",
             fmt_val(kp['vol_devis'], unite="devis"),
@@ -489,9 +454,9 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
             annee_prev=annee_prev, annee_next=annee_next,
             unite="devis",
         )
-    with cols2[1]:
+    with cols1[1]:
         st.markdown("<div class='formula-op'>×</div>", unsafe_allow_html=True)
-    with cols2[2]:
+    with cols1[2]:
         kpi_card(
             "% Succès (Volume)",
             fmt_val(kp['tx_vol'], is_pct=True),
@@ -499,9 +464,9 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
             annee_prev=annee_prev, annee_next=annee_next,
             is_pct=True,
         )
-    with cols2[3]:
+    with cols1[3]:
         st.markdown("<div class='formula-op'>=</div>", unsafe_allow_html=True)
-    with cols2[4]:
+    with cols1[4]:
         kpi_card(
             "Nombre de commandes",
             fmt_val(kp['vol_signe'], unite="signés"),
@@ -509,8 +474,29 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
             annee_prev=annee_prev, annee_next=annee_next,
             unite="signés",
         )
+    
+    # ── ROW 2 : FLÈCHES 2D ET MULTIPLICATEURS VERTICAUX ──
+    cols2 = st.columns([4, 0.5, 4, 0.5, 4, 0.5, 4])
+    
+    # Partie gauche : Nb devis -> CA Devisé
+    with cols2[0]:
+        st.markdown("<div style='text-align:center; font-size: 2rem; color:#cbd5e1; padding-top: 15px;'>⬇</div>", unsafe_allow_html=True)
+    with cols2[1]:
+        st.markdown("<div class='formula-op' style='padding-top:30px;'>×</div>", unsafe_allow_html=True)
+    with cols2[2]:
+        kpi_card(
+            "🛒 Devis moyen",
+            fmt_val(kp['cmd_moy_tous']),
+            delta_prev=d_prev('cmd_moy_tous'), delta_next=d_next('cmd_moy_tous'),
+            annee_prev=annee_prev, annee_next=annee_next,
+            force_color="accent",
+        )
+
+    # Partie droite : Nb commandes -> CA Commandes
+    with cols2[4]:
+        st.markdown("<div style='text-align:center; font-size: 2rem; color:#cbd5e1; padding-top: 15px;'>⬇</div>", unsafe_allow_html=True)
     with cols2[5]:
-        st.markdown("<div class='formula-op'>×</div>", unsafe_allow_html=True)
+        st.markdown("<div class='formula-op' style='padding-top:30px;'>×</div>", unsafe_allow_html=True)
     with cols2[6]:
         kpi_card(
             "✅ Commande moy. (signés)",
@@ -520,20 +506,36 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
             force_color=cmd_moy_signe_color,
         )
 
-    st.write("")
-
-    # ── ROW 3 : Commande moyenne (tous devis) — standalone ──
-    st.markdown("<div style='margin-bottom:6px; font-size:0.8rem; color:#94a3b8; font-weight:600; letter-spacing:0.05em;'>🛒 INDICATEUR COMPLÉMENTAIRE</div>", unsafe_allow_html=True)
-    cols3 = st.columns([5, 0.7, 5, 0.7, 5])
+    # ── ROW 3 : FORMULE CA ──
+    st.markdown("<div style='margin-bottom:6px; margin-top:10px; font-size:0.8rem; color:#94a3b8; font-weight:600; letter-spacing:0.05em;'>💰 FORMULE CA : CA Devisé × % Succès (€) = CA Commandes</div>", unsafe_allow_html=True)
+    cols3 = st.columns([4, 0.5, 4, 0.5, 4, 0.5, 4])
     with cols3[0]:
         kpi_card(
-            "🛒 Commande moy. (tous devis)",
-            fmt_val(kp['cmd_moy_tous']),
-            delta_prev=d_prev('cmd_moy_tous'), delta_next=d_next('cmd_moy_tous'),
+            f"CA Devisé {annee_selectionnee}",
+            fmt_val(kp['ca_devis']),
+            delta_prev=d_prev('ca_devis'), delta_next=d_next('ca_devis'),
             annee_prev=annee_prev, annee_next=annee_next,
-            force_color="accent",
         )
-    # remaining cols empty
+    with cols3[1]:
+        st.markdown("<div class='formula-op'>×</div>", unsafe_allow_html=True)
+    with cols3[2]:
+        kpi_card(
+            "% Succès (€)",
+            fmt_val(kp['tx_ca'], is_pct=True),
+            delta_prev=d_prev('tx_ca'), delta_next=d_next('tx_ca'),
+            annee_prev=annee_prev, annee_next=annee_next,
+            is_pct=True,
+            force_color=tx_ca_color,
+        )
+    with cols3[3]:
+        st.markdown("<div class='formula-op'>=</div>", unsafe_allow_html=True)
+    with cols3[4]:
+        kpi_card(
+            f"CA Commandes {annee_selectionnee}",
+            fmt_val(kp['ca_signe']),
+            delta_prev=d_prev('ca_signe'), delta_next=d_next('ca_signe'),
+            annee_prev=annee_prev, annee_next=annee_next,
+        )
 
 
 # ========================================================
@@ -648,9 +650,10 @@ if vue_annuelle and len(annees_selectionnees) > 0:
             df_recap['Commandes'] = df_recap['vol_signe'].astype(int)
             df_recap['Devis émis'] = df_recap['vol_devis'].astype(int)
             df_recap['Tx Succès (vol)'] = df_recap['tx_vol'].map(lambda x: f"{x:.2f} %".replace('.', ','))
-            df_recap['Cmd moy. (tous)'] = df_recap['cmd_moy_tous'].map(lambda x: f"{x:,.0f} €".replace(',', ' '))
+            # Remplacement du libellé "Cmd moy. (tous)" par "Devis moyen" dans le récap
+            df_recap['Devis moyen'] = df_recap['cmd_moy_tous'].map(lambda x: f"{x:,.0f} €".replace(',', ' '))
             df_recap['Cmd moy. (signés)'] = df_recap['cmd_moy_signe'].map(lambda x: f"{x:,.0f} €".replace(',', ' '))
-            st.dataframe(df_recap[['Année', 'CA Commandes', 'CA Devisé', 'Tx Succès (€)', 'Commandes', 'Devis émis', 'Tx Succès (vol)', 'Cmd moy. (tous)', 'Cmd moy. (signés)']], use_container_width=True, hide_index=True)
+            st.dataframe(df_recap[['Année', 'CA Commandes', 'CA Devisé', 'Tx Succès (€)', 'Commandes', 'Devis émis', 'Tx Succès (vol)', 'Devis moyen', 'Cmd moy. (signés)']], use_container_width=True, hide_index=True)
 
 elif not vue_annuelle and len(annees_selectionnees) > 0:
     tabs_val = st.tabs([f"Année {annee}" for annee in annees_selectionnees])
