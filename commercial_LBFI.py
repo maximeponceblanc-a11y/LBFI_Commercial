@@ -9,7 +9,7 @@ import io
 import requests
 
 # --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="LBFI Business Intelligence", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Tableau de bord LBFI", layout="wide", page_icon="📊")
 
 st.markdown("""
     <style>
