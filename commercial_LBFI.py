@@ -391,7 +391,7 @@ def kpi_card(label, value, delta_prev=None, delta_next=None,
         {delta_block}
     </div>
     """
-    st.markdown(html, unsafe_allow_html=True)
+    st.html(html) # Correction appliquée ici !
 
 
 def compute_delta(val_curr, kpis_ref, cle):
