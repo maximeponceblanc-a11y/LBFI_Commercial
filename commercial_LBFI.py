@@ -20,6 +20,59 @@ st.markdown("""
         border: 1px solid #e2e8f0;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
+
+    /* ── KPI cards ── */
+    .kpi-card {
+        border-radius: 10px;
+        padding: 14px 16px 12px 16px;
+        border: 1.5px solid #e2e8f0;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .kpi-card.green  { background: #f0fdf4; border-color: #86efac; }
+    .kpi-card.red    { background: #fff1f2; border-color: #fca5a5; }
+    .kpi-card.neutral{ background: #f8fafc; border-color: #cbd5e1; }
+    .kpi-card.accent { background: #fffbeb; border-color: #fcd34d; }
+
+    .kpi-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #64748b;
+        margin: 0;
+    }
+    .kpi-value {
+        font-size: 1.65rem;
+        font-weight: 700;
+        color: #1e293b;
+        line-height: 1.1;
+        margin: 2px 0 6px 0;
+    }
+    .kpi-delta {
+        font-size: 0.78rem;
+        font-weight: 500;
+        line-height: 1.55;
+        color: #64748b;
+    }
+    .kpi-delta .up   { color: #16a34a; }
+    .kpi-delta .down { color: #dc2626; }
+    .kpi-delta .flat { color: #64748b; }
+
+    /* operator symbols between cards */
+    .formula-op {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #94a3b8;
+        padding: 0 4px;
+        padding-top: 30px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -287,6 +340,203 @@ def extraire_kpis_annee(dataframe, annee_cible):
 
 
 # ========================================================
+# HELPER : CARTE KPI « FORMULE MAGIQUE »
+# ========================================================
+def kpi_card(label, value, delta_prev=None, delta_next=None,
+             annee_prev=None, annee_next=None,
+             unite="€", is_pct=False, force_color=None):
+    """
+    Renders a styled KPI card using HTML.
+    force_color: 'green' | 'red' | 'accent' | 'neutral' | None (auto from delta_prev)
+    """
+
+    def _delta_html(val_curr, kpis_ref, label_annee):
+        if kpis_ref is None:
+            return f"<span class='flat'>vs {label_annee} : —</span>"
+        # kpis_ref is already the numeric diff value passed directly
+        diff = val_curr
+        if diff > 0.001:
+            cls = "up"; arrow = "↗"; sign = "+"
+        elif diff < -0.001:
+            cls = "down"; arrow = "↘"; sign = ""
+        else:
+            cls = "flat"; arrow = "→"; sign = ""
+        if is_pct:
+            txt = f"{sign}{diff:.2f} pts".replace('.', ',')
+        else:
+            txt = f"{sign}{diff:,.0f} {unite}".replace(',', ' ')
+        return f"<span class='{cls}'>{arrow} vs {label_annee} : {txt}</span>"
+
+    # Determine card color
+    if force_color:
+        color_cls = force_color
+    elif delta_prev is not None:
+        color_cls = "green" if delta_prev > 0.001 else ("red" if delta_prev < -0.001 else "neutral")
+    else:
+        color_cls = "neutral"
+
+    # Build delta lines
+    delta_html = ""
+    if delta_prev is not None and annee_prev is not None:
+        delta_html += _delta_html(delta_prev, True, annee_prev) + "<br>"
+    if delta_next is not None and annee_next is not None:
+        delta_html += _delta_html(delta_next, True, annee_next)
+
+    delta_block = f"<div class='kpi-delta'>{delta_html}</div>" if delta_html else ""
+
+    html = f"""
+    <div class="kpi-card {color_cls}">
+        <p class="kpi-label">{label}</p>
+        <p class="kpi-value">{value}</p>
+        {delta_block}
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def compute_delta(val_curr, kpis_ref, cle):
+    """Returns numeric diff or None if no reference."""
+    if kpis_ref is None:
+        return None
+    return val_curr - kpis_ref[cle]
+
+
+def fmt_val(v, unite="€", is_pct=False, decimals=0):
+    if is_pct:
+        return f"{v:.2f} %".replace('.', ',')
+    if decimals:
+        return f"{v:,.{decimals}f} {unite}".replace(',', ' ')
+    return f"{int(round(v)):,} {unite}".replace(',', ' ') if unite else f"{int(round(v)):,}"
+
+
+def render_kpi_section(kpis_current, kpis_prev, kpis_next,
+                       annee_selectionnee, annee_prev, annee_next):
+    """
+    Renders the 8 KPI cards arranged in the « Formule Magique » layout:
+
+    Row 1 — CA formula:
+      [CA Devisé]  ×  [% Succès €]  =  [CA Commandes]
+
+    Row 2 — Volume formula:
+      [Nb devis]  ×  [% Succès vol]  =  [Nb commandes]  ×  [Cmd moy. signés]  ↘
+
+    Row 3 — Average order:
+      (result arrow from row 2 lands here)             [Cmd moy. tous devis]
+    """
+    if not kpis_current:
+        st.info("Aucun indicateur disponible pour cette période.")
+        return
+
+    kp = kpis_current
+
+    def d_prev(cle):
+        return compute_delta(kp[cle], kpis_prev, cle)
+
+    def d_next(cle):
+        return compute_delta(kp[cle], kpis_next, cle)
+
+    # ── Shared color for "bad" metrics ──
+    # tx_ca can be green or red vs prev
+    tx_ca_color = None
+    if kpis_prev:
+        tx_ca_color = "green" if kp['tx_ca'] >= kpis_prev['tx_ca'] else "red"
+
+    cmd_moy_signe_color = None
+    if kpis_prev:
+        cmd_moy_signe_color = "green" if kp['cmd_moy_signe'] >= kpis_prev['cmd_moy_signe'] else "red"
+
+    # ── ROW 1 : CA Devisé × % Succès (€) = CA Commandes ──
+    st.markdown("<div style='margin-bottom:6px; font-size:0.8rem; color:#94a3b8; font-weight:600; letter-spacing:0.05em;'>💰 FORMULE CA : CA Devisé × % Succès (€) = CA Commandes</div>", unsafe_allow_html=True)
+    cols = st.columns([5, 0.7, 5, 0.7, 5])
+    with cols[0]:
+        kpi_card(
+            f"CA Devisé {annee_selectionnee}",
+            fmt_val(kp['ca_devis']),
+            delta_prev=d_prev('ca_devis'), delta_next=d_next('ca_devis'),
+            annee_prev=annee_prev, annee_next=annee_next,
+        )
+    with cols[1]:
+        st.markdown("<div class='formula-op'>×</div>", unsafe_allow_html=True)
+    with cols[2]:
+        kpi_card(
+            "% Succès (€)",
+            fmt_val(kp['tx_ca'], is_pct=True),
+            delta_prev=d_prev('tx_ca'), delta_next=d_next('tx_ca'),
+            annee_prev=annee_prev, annee_next=annee_next,
+            is_pct=True,
+            force_color=tx_ca_color,
+        )
+    with cols[3]:
+        st.markdown("<div class='formula-op'>=</div>", unsafe_allow_html=True)
+    with cols[4]:
+        kpi_card(
+            f"CA Commandes {annee_selectionnee}",
+            fmt_val(kp['ca_signe']),
+            delta_prev=d_prev('ca_signe'), delta_next=d_next('ca_signe'),
+            annee_prev=annee_prev, annee_next=annee_next,
+        )
+
+    st.write("")
+
+    # ── ROW 2 : Nb devis × % Succès (vol) = Nb commandes × Cmd moy. signés ──
+    st.markdown("<div style='margin-bottom:6px; font-size:0.8rem; color:#94a3b8; font-weight:600; letter-spacing:0.05em;'>📦 FORMULE VOLUME : Nb devis × % Succès (vol) = Nb commandes × Cmd moy. (signés)</div>", unsafe_allow_html=True)
+    cols2 = st.columns([5, 0.7, 5, 0.7, 5, 0.7, 5])
+    with cols2[0]:
+        kpi_card(
+            "Nombre de devis émis",
+            fmt_val(kp['vol_devis'], unite="devis"),
+            delta_prev=d_prev('vol_devis'), delta_next=d_next('vol_devis'),
+            annee_prev=annee_prev, annee_next=annee_next,
+            unite="devis",
+        )
+    with cols2[1]:
+        st.markdown("<div class='formula-op'>×</div>", unsafe_allow_html=True)
+    with cols2[2]:
+        kpi_card(
+            "% Succès (Volume)",
+            fmt_val(kp['tx_vol'], is_pct=True),
+            delta_prev=d_prev('tx_vol'), delta_next=d_next('tx_vol'),
+            annee_prev=annee_prev, annee_next=annee_next,
+            is_pct=True,
+        )
+    with cols2[3]:
+        st.markdown("<div class='formula-op'>=</div>", unsafe_allow_html=True)
+    with cols2[4]:
+        kpi_card(
+            "Nombre de commandes",
+            fmt_val(kp['vol_signe'], unite="signés"),
+            delta_prev=d_prev('vol_signe'), delta_next=d_next('vol_signe'),
+            annee_prev=annee_prev, annee_next=annee_next,
+            unite="signés",
+        )
+    with cols2[5]:
+        st.markdown("<div class='formula-op'>×</div>", unsafe_allow_html=True)
+    with cols2[6]:
+        kpi_card(
+            "✅ Commande moy. (signés)",
+            fmt_val(kp['cmd_moy_signe']),
+            delta_prev=d_prev('cmd_moy_signe'), delta_next=d_next('cmd_moy_signe'),
+            annee_prev=annee_prev, annee_next=annee_next,
+            force_color=cmd_moy_signe_color,
+        )
+
+    st.write("")
+
+    # ── ROW 3 : Commande moyenne (tous devis) — standalone ──
+    st.markdown("<div style='margin-bottom:6px; font-size:0.8rem; color:#94a3b8; font-weight:600; letter-spacing:0.05em;'>🛒 INDICATEUR COMPLÉMENTAIRE</div>", unsafe_allow_html=True)
+    cols3 = st.columns([5, 0.7, 5, 0.7, 5])
+    with cols3[0]:
+        kpi_card(
+            "🛒 Commande moy. (tous devis)",
+            fmt_val(kp['cmd_moy_tous']),
+            delta_prev=d_prev('cmd_moy_tous'), delta_next=d_next('cmd_moy_tous'),
+            annee_prev=annee_prev, annee_next=annee_next,
+            force_color="accent",
+        )
+    # remaining cols empty
+
+
+# ========================================================
 # RENDER : VUE UNIQUE PERFORMANCE COMMERCIALE
 # ========================================================
 st.subheader("Performance Commerciale")
@@ -327,64 +577,14 @@ if vue_annuelle and len(annees_selectionnees) > 0:
     )
 
     if kpis_courant:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric(
-                label=f"CA Commandes {annee_courante}",
-                value=f"{kpis_courant['ca_signe']:,.0f} €".replace(',', ' '),
-                delta=delta_str(kpis_courant['ca_signe'], ref['ca_signe'] if ref else None)
-            )
-        with c2:
-            st.metric(
-                label=f"CA Devisé {annee_courante}",
-                value=f"{kpis_courant['ca_devis']:,.0f} €".replace(',', ' '),
-                delta=delta_str(kpis_courant['ca_devis'], ref['ca_devis'] if ref else None)
-            )
-        with c3:
-            st.metric(
-                label="% Succès (€)",
-                value=f"{kpis_courant['tx_ca']:.2f} %".replace('.', ','),
-                delta=delta_str(kpis_courant['tx_ca'], ref['tx_ca'] if ref else None, is_pct=True)
-            )
-
-        st.write("")
-
-        c4, c5, c6 = st.columns(3)
-        with c4:
-            st.metric(
-                label="Nombre de commandes",
-                value=f"{int(kpis_courant['vol_signe'])}",
-                delta=delta_str(kpis_courant['vol_signe'], ref['vol_signe'] if ref else None, unite="")
-            )
-        with c5:
-            st.metric(
-                label="Nombre de devis émis",
-                value=f"{int(kpis_courant['vol_devis'])}",
-                delta=delta_str(kpis_courant['vol_devis'], ref['vol_devis'] if ref else None, unite="")
-            )
-        with c6:
-            st.metric(
-                label="% Succès (Volume)",
-                value=f"{kpis_courant['tx_vol']:.2f} %".replace('.', ','),
-                delta=delta_str(kpis_courant['tx_vol'], ref['tx_vol'] if ref else None, is_pct=True)
-            )
-
-        st.write("")
-
-        c7, c8, _ = st.columns(3)
-        with c7:
-            st.metric(
-                label="✅ Commande moyenne (signés)",
-                value=f"{kpis_courant['cmd_moy_signe']:,.0f} €".replace(',', ' '),
-                delta=delta_str(kpis_courant['cmd_moy_signe'], ref['cmd_moy_signe'] if ref else None)
-            )
-        with c8:
-            st.metric(
-                label="🛒 Commande moyenne (tous devis)",
-                value=f"{kpis_courant['cmd_moy_tous']:,.0f} €".replace(',', ' '),
-                delta=delta_str(kpis_courant['cmd_moy_tous'], ref['cmd_moy_tous'] if ref else None)
-            )
-
+        render_kpi_section(
+            kpis_current=kpis_courant,
+            kpis_prev=kpis_precedent,
+            kpis_next=None,
+            annee_selectionnee=annee_courante,
+            annee_prev=annee_precedente,
+            annee_next=None,
+        )
         if ref:
             st.caption(f"↕ Deltas calculés par rapport à {annee_precedente}")
 
@@ -467,54 +667,14 @@ elif not vue_annuelle and len(annees_selectionnees) > 0:
             kpis_next = extraire_kpis_annee(df_filtered_base, annee_next)
 
             if kpis_current:
-                def générer_html_delta(val_curr, kpis_ref, cle, label_annee, unite="€", is_pct=False):
-                    if not kpis_ref:
-                        return f"<span style='color: #94a3b8;'>vs {label_annee} : -</span>"
-                    val_ref = kpis_ref[cle]
-                    diff = val_curr - val_ref
-                    if diff > 0.001:
-                        color = "#22c55e"; arrow = "↗"; sign = "+"
-                    elif diff < -0.001:
-                        color = "#ef4444"; arrow = "↘"; sign = ""
-                    else:
-                        color = "#64748b"; arrow = "→"; sign = ""
-                    if is_pct:
-                        val_txt = f"{sign}{diff:.2f} pts".replace('.', ',')
-                    else:
-                        val_txt = f"{sign}{diff:,.0f} {unite}".replace(',', ' ')
-                    return f"<span style='color: {color}; font-weight: 500;'>{arrow} vs {label_annee} : {val_txt}</span>"
-
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.metric(label=f"CA Commandes {annee_selectionnee}", value=f"{kpis_current['ca_signe']:,.0f} €".replace(',', ' '))
-                    st.markdown(f"{générer_html_delta(kpis_current['ca_signe'], kpis_prev, 'ca_signe', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['ca_signe'], kpis_next, 'ca_signe', annee_next)}", unsafe_allow_html=True)
-                with c2:
-                    st.metric(label=f"CA Devisé {annee_selectionnee}", value=f"{kpis_current['ca_devis']:,.0f} €".replace(',', ' '))
-                    st.markdown(f"{générer_html_delta(kpis_current['ca_devis'], kpis_prev, 'ca_devis', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['ca_devis'], kpis_next, 'ca_devis', annee_next)}", unsafe_allow_html=True)
-                with c3:
-                    st.metric(label="% Succès (€)", value=f"{kpis_current['tx_ca']:.2f} %".replace('.', ','))
-                    st.markdown(f"{générer_html_delta(kpis_current['tx_ca'], kpis_prev, 'tx_ca', annee_prev, is_pct=True)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['tx_ca'], kpis_next, 'tx_ca', annee_next, is_pct=True)}", unsafe_allow_html=True)
-
-                st.write("")
-                c4, c5, c6 = st.columns(3)
-                with c4:
-                    st.metric(label="Nombre de commandes", value=f"{kpis_current['vol_signe']}")
-                    st.markdown(f"{générer_html_delta(kpis_current['vol_signe'], kpis_prev, 'vol_signe', annee_prev, 'signés')} &nbsp;|&nbsp; {générer_html_delta(kpis_current['vol_signe'], kpis_next, 'vol_signe', annee_next, 'signés')}", unsafe_allow_html=True)
-                with c5:
-                    st.metric(label="Nombre de devis émis", value=f"{kpis_current['vol_devis']}")
-                    st.markdown(f"{générer_html_delta(kpis_current['vol_devis'], kpis_prev, 'vol_devis', annee_prev, 'devis')} &nbsp;|&nbsp; {générer_html_delta(kpis_current['vol_devis'], kpis_next, 'vol_devis', annee_next, 'devis')}", unsafe_allow_html=True)
-                with c6:
-                    st.metric(label="% Succès (Volume)", value=f"{kpis_current['tx_vol']:.2f} %".replace('.', ','))
-                    st.markdown(f"{générer_html_delta(kpis_current['tx_vol'], kpis_prev, 'tx_vol', annee_prev, is_pct=True)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['tx_vol'], kpis_next, 'tx_vol', annee_next, is_pct=True)}", unsafe_allow_html=True)
-
-                st.write("")
-                c7, c8, _ = st.columns(3)
-                with c7:
-                    st.metric(label="✅ Commande moyenne (signés)", value=f"{kpis_current['cmd_moy_signe']:,.0f} €".replace(',', ' '))
-                    st.markdown(f"{générer_html_delta(kpis_current['cmd_moy_signe'], kpis_prev, 'cmd_moy_signe', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['cmd_moy_signe'], kpis_next, 'cmd_moy_signe', annee_next)}", unsafe_allow_html=True)
-                with c8:
-                    st.metric(label="🛒 Commande moyenne (tous devis)", value=f"{kpis_current['cmd_moy_tous']:,.0f} €".replace(',', ' '))
-                    st.markdown(f"{générer_html_delta(kpis_current['cmd_moy_tous'], kpis_prev, 'cmd_moy_tous', annee_prev)} &nbsp;|&nbsp; {générer_html_delta(kpis_current['cmd_moy_tous'], kpis_next, 'cmd_moy_tous', annee_next)}", unsafe_allow_html=True)
+                render_kpi_section(
+                    kpis_current=kpis_current,
+                    kpis_prev=kpis_prev,
+                    kpis_next=kpis_next,
+                    annee_selectionnee=annee_selectionnee,
+                    annee_prev=annee_prev,
+                    annee_next=annee_next,
+                )
 
             st.divider()
 
