@@ -418,7 +418,7 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
       [Nb devis]  ×  [% Succès vol]  =  [Nb commandes]
 
     Row 2 — Arrows & Average order (2D Multipliers):
-         ⬇        ×  [Devis moyen]           ⬇        ×  [Cmd moy. signés]
+                     [Devis moyen]           ⬇(thick) ×  [Cmd moy. signés]
 
     Row 3 — CA formula:
       [CA Devisé] ×  [% Succès €]    =  [CA Commandes]
@@ -478,11 +478,11 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
     # ── ROW 2 : FLÈCHES 2D ET MULTIPLICATEURS VERTICAUX ──
     cols2 = st.columns([4, 0.5, 4, 0.5, 4, 0.5, 4])
     
-    # Partie gauche : Nb devis -> CA Devisé
+    # Partie gauche : Flèche et "x" retirés comme demandé
     with cols2[0]:
-        st.markdown("<div style='text-align:center; font-size: 2rem; color:#cbd5e1; padding-top: 15px;'>⬇</div>", unsafe_allow_html=True)
+        st.write("")
     with cols2[1]:
-        st.markdown("<div class='formula-op' style='padding-top:30px;'>×</div>", unsafe_allow_html=True)
+        st.write("")
     with cols2[2]:
         kpi_card(
             "🛒 Devis moyen",
@@ -492,9 +492,17 @@ def render_kpi_section(kpis_current, kpis_prev, kpis_next,
             force_color="accent",
         )
 
-    # Partie droite : Nb commandes -> CA Commandes
+    # Partie droite : Nb commandes -> CA Commandes (avec Flèche SVG sur mesure)
     with cols2[4]:
-        st.markdown("<div style='text-align:center; font-size: 2rem; color:#cbd5e1; padding-top: 15px;'>⬇</div>", unsafe_allow_html=True)
+        arrow_svg = """
+        <div style='display:flex; justify-content:center; align-items:center; padding-top: 15px; padding-bottom: 5px;'>
+            <svg width='30' height='60' viewBox='0 0 24 60' fill='none' stroke='#cbd5e1' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'>
+                <line x1='12' y1='5' x2='12' y2='55'></line>
+                <polyline points='5 45 12 55 19 45'></polyline>
+            </svg>
+        </div>
+        """
+        st.markdown(arrow_svg, unsafe_allow_html=True)
     with cols2[5]:
         st.markdown("<div class='formula-op' style='padding-top:30px;'>×</div>", unsafe_allow_html=True)
     with cols2[6]:
